@@ -1,6 +1,6 @@
 # lark-channel-bridge
 
-把飞书 / Lark 消息和本地 Claude Code 或 Codex CLI 打通的轻量 bot。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里和本机编程助手对话，让它读图、处理文件、改代码。
+把飞书 / Lark 消息和本地 Claude Code、Codex CLI 或 ZCode 打通的轻量 bot。用一条命令启动，扫码绑定 PersonalAgent 应用，然后在飞书里和本机编程助手对话，让它读图、处理文件、改代码。
 
 [English README](./README.md)
 
@@ -23,6 +23,7 @@
 - 本机至少安装并登录一个 agent：
   - Claude Code：`claude`，安装说明：https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI：`codex`，安装说明：https://developers.openai.com/codex/cli
+  - ZCode：桌面版自带的引擎（`zcode.cjs`），自动探测 `%LOCALAPPDATA%ProgramsZCodeesourcesglmzcode.cjs`；需要 `~/.zcode/cli/config.json` 已配置模型 provider。默认走 ZCode Protocol（`app-server`，与桌面版共用同一引擎，会话互通；可在配置中设 `zcode.transport: "cli"` 切换为一次性 CLI 模式）
 - 一个飞书 / Lark PersonalAgent 应用。首次启动的扫码向导可以帮你创建并绑定。
 
 ## 安装

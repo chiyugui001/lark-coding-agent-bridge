@@ -13,7 +13,7 @@ import {
   type PermissionSource,
 } from './permissions';
 
-export type AgentKind = 'claude' | 'codex';
+export type AgentKind = 'claude' | 'codex' | 'zcode';
 export type SandboxMode = CodexSandboxMode;
 export type { AccessMode, PermissionConfig, PermissionSource };
 
@@ -49,6 +49,13 @@ export interface CodexConfig {
   inheritCodexHome?: boolean;
   ignoreUserConfig?: boolean;
   ignoreRules?: boolean;
+}
+
+export interface ZcodeConfig {
+  /** Executable or `zcode.cjs` bundle path. Defaults to the desktop install. */
+  binaryPath?: string;
+  /** `app-server` (default, persistent ZCode Protocol process) or `cli` (one-shot per run). */
+  transport?: 'app-server' | 'cli';
 }
 
 export interface AttachmentConfig {
@@ -160,6 +167,7 @@ export interface ProfileConfig {
   permissions: PermissionConfig;
   permissionSource?: PermissionSource;
   codex?: CodexConfig;
+  zcode?: ZcodeConfig;
   attachments: AttachmentConfig;
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
@@ -204,6 +212,7 @@ export interface CreateDefaultProfileConfigInput {
   sandbox?: Partial<SandboxConfig>;
   permissions?: Partial<PermissionConfig>;
   codex?: CodexConfig;
+  zcode?: ZcodeConfig;
   secrets?: SecretsConfig;
 }
 
@@ -239,6 +248,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     sandbox?: Partial<SandboxConfig>;
     permissions?: Partial<PermissionConfig>;
     codex?: CodexConfig & { flags?: unknown };
+    zcode?: ZcodeConfig;
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
@@ -248,8 +258,8 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   if (raw.schemaVersion !== 2) {
     throw new Error('profile schemaVersion must be 2');
   }
-  if (raw.agentKind !== 'claude' && raw.agentKind !== 'codex') {
-    throw new Error('agentKind must be claude or codex');
+  if (raw.agentKind !== 'claude' && raw.agentKind !== 'codex' && raw.agentKind !== 'zcode') {
+    throw new Error('agentKind must be claude, codex or zcode');
   }
   const accounts = normalizeAccounts(raw.accounts);
   if (raw.agentKind === 'codex' && !raw.codex) {
@@ -284,6 +294,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissions,
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
+    ...(raw.zcode ? { zcode: normalizeZcode(raw.zcode) } : {}),
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),
@@ -389,6 +400,16 @@ function normalizeCodex(input: CodexConfig & { flags?: unknown }): CodexConfig {
     ignoreRules: input.ignoreRules !== false,
   };
   return codex;
+}
+
+function normalizeZcode(input: ZcodeConfig): ZcodeConfig {
+  const transport = input.transport === 'cli' ? 'cli' : input.transport === 'app-server' ? 'app-server' : undefined;
+  return {
+    ...(typeof input.binaryPath === 'string' && input.binaryPath.trim()
+      ? { binaryPath: input.binaryPath.trim() }
+      : {}),
+    ...(transport ? { transport } : {}),
+  };
 }
 
 function normalizeComments(_input: unknown): CommentConfig {

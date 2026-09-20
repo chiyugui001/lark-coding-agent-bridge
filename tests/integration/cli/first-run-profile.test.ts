@@ -135,8 +135,10 @@ describe('first-run profile bootstrap', () => {
     const oldPath = process.env.PATH;
     const oldClaude = process.env.LARK_CHANNEL_CLAUDE_BIN;
     const oldCodex = process.env.LARK_CHANNEL_CODEX_BIN;
+    const oldZcode = process.env.LARK_CHANNEL_ZCODE_BIN;
     process.env.PATH = root;
     process.env.LARK_CHANNEL_CLAUDE_BIN = 'missing-claude';
+    process.env.LARK_CHANNEL_ZCODE_BIN = 'missing-zcode';
     process.env.LARK_CHANNEL_CODEX_BIN = process.platform === 'win32' ? codex : 'codex';
     try {
       await expect(detectInstalledAgents()).resolves.toEqual([
@@ -153,6 +155,11 @@ describe('first-run profile bootstrap', () => {
         delete process.env.LARK_CHANNEL_CODEX_BIN;
       } else {
         process.env.LARK_CHANNEL_CODEX_BIN = oldCodex;
+      }
+      if (oldZcode === undefined) {
+        delete process.env.LARK_CHANNEL_ZCODE_BIN;
+      } else {
+        process.env.LARK_CHANNEL_ZCODE_BIN = oldZcode;
       }
     }
   });

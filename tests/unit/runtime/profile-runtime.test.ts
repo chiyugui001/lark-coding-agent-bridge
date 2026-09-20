@@ -296,7 +296,10 @@ describe('profile runtime resolver', () => {
           config: join(root, 'config.json'),
           allowBootstrap: true,
           selectAgent: (detected) => {
-            expect(detected.map((agent) => agent.kind)).toEqual(['claude', 'codex']);
+            expect(detected.map((agent) => agent.kind).filter((kind) => kind !== 'zcode')).toEqual([
+              'claude',
+              'codex',
+            ]);
             return 'codex';
           },
         }),

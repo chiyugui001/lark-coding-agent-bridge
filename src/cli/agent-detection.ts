@@ -1,8 +1,10 @@
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { delimiter, extname, isAbsolute, join } from 'node:path';
+import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 
-export type AgentKind = 'claude' | 'codex';
+export type AgentKind = 'claude' | 'codex' | 'zcode';
 
 export interface DetectedAgent {
   kind: AgentKind;
@@ -44,10 +46,26 @@ function pathExts(): string[] {
     .filter(Boolean);
 }
 
+/** Default zcode CLI location: the ZCode desktop install's node bundle. */
+function defaultZcodeBinary(): string {
+  const candidate = join(
+    homedir(),
+    'AppData',
+    'Local',
+    'Programs',
+    'ZCode',
+    'resources',
+    'glm',
+    'zcode.cjs',
+  );
+  return existsSync(candidate) ? candidate : 'zcode';
+}
+
 export async function detectInstalledAgents(): Promise<DetectedAgent[]> {
   const candidates: Array<{ kind: AgentKind; command: string }> = [
     { kind: 'claude', command: process.env.LARK_CHANNEL_CLAUDE_BIN ?? 'claude' },
     { kind: 'codex', command: process.env.LARK_CHANNEL_CODEX_BIN ?? 'codex' },
+    { kind: 'zcode', command: process.env.LARK_CHANNEL_ZCODE_BIN ?? defaultZcodeBinary() },
   ];
   const detected: DetectedAgent[] = [];
   for (const candidate of candidates) {
