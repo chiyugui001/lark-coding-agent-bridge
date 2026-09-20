@@ -1,6 +1,6 @@
 # lark-channel-bridge
 
-A lightweight bot that bridges Feishu / Lark messenger with your local Claude Code or Codex CLI. Run one command, scan a QR code to bind a PersonalAgent app, and talk to your local coding agent from chat.
+A lightweight bot that bridges Feishu / Lark messenger with your local Claude Code, Codex CLI, or ZCode. Run one command, scan a QR code to bind a PersonalAgent app, and talk to your local coding agent from chat.
 
 [中文 README](./README.zh.md)
 
@@ -23,6 +23,7 @@ For a product walkthrough, see the [Feishu document](https://larkcommunity.feish
 - At least one local agent installed and logged in:
   - Claude Code: `claude`, see https://docs.anthropic.com/en/docs/claude-code/quickstart
   - Codex CLI: `codex`, see https://developers.openai.com/codex/cli
+  - ZCode: the desktop install's engine (`zcode.cjs`), auto-detected at `%LOCALAPPDATA%ProgramsZCodeesourcesglmzcode.cjs`; requires `~/.zcode/cli/config.json` with a model provider. Runs over the ZCode Protocol (`app-server`, shared with the desktop app; set `zcode.transport: "cli"` for one-shot mode)
 - A Feishu / Lark **PersonalAgent** app. The first-run QR wizard can create and bind one for you.
 
 ## Install
