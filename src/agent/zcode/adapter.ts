@@ -138,6 +138,50 @@ export class ZcodeAdapter implements AgentAdapter {
 
     const desktopSync = this.desktopSync;
     const events = (async function* (): AsyncGenerator<AgentEvent> {
+      /**
+       * A resumed session can carry a model reference the engine can no
+       * longer resolve (e.g. the desktop app rewrote it to `builtin:...`, or
+       * the session's model selection was cleared). Detect that class of
+       * failure and recover by abandoning the old session and replaying the
+       * prompt in a fresh one, once.
+       */
+      const isModelUnavailableError = (detail: string): boolean =>
+        /ZCODE_RUNTIME_MODEL_UNAVAILABLE|Select a model|Model creation failed|历史任务使用的模型已不可用/i.test(
+          detail,
+        );
+      let recoveredFromSessionId: string | undefined;
+      const startSession = async (): Promise<{
+        sessionId: string;
+        unsubscribe: () => void;
+        queue: AppServerSessionEvent[];
+        waiters: Array<() => void>;
+      }> => {
+        const created = await client.request<{ session?: { sessionId?: string } }>(
+          'session/create',
+          { workspace: { workspaceKey: opts.cwd, workspacePath: opts.cwd } },
+        );
+        const freshId = created?.session?.sessionId;
+        if (!freshId) throw new Error('zcode app-server returned no sessionId');
+        await client
+          .request('session/setMode', { sessionId: freshId, mode: zcodeModeFor(opts.permissionMode) })
+          .catch(() => undefined);
+        const queue: AppServerSessionEvent[] = [];
+        const waiters: Array<() => void> = [];
+        const unsubscribe = client.subscribe(freshId, (event) => {
+          queue.push(event);
+          while (waiters.length) waiters.shift()!();
+        });
+        await client.request('session/subscribe', {
+          sessionId: freshId,
+          deliveryKind: 'desktop-continuous',
+        });
+        return { sessionId: freshId, unsubscribe, queue, waiters };
+      };
+
+      let unsubscribe: (() => void) | undefined;
+      let wake: (() => void) | undefined;
+      let queue: AppServerSessionEvent[] = [];
+      let waiters: Array<() => void> = [];
       try {
         if (opts.sessionId) {
           try {
@@ -147,40 +191,58 @@ export class ZcodeAdapter implements AgentAdapter {
             sessionId = undefined; // stale session id — fall through to create
           }
         }
-        if (!sessionId) {
-          const created = await client.request<{ session?: { sessionId?: string } }>(
-            'session/create',
-            { workspace: { workspaceKey: opts.cwd, workspacePath: opts.cwd } },
-          );
-          sessionId = created?.session?.sessionId;
-        }
-        if (!sessionId) throw new Error('zcode app-server returned no sessionId');
-
-        // Bridge chats run unattended; yolo skips interactive permission gates.
-        await client
-          .request('session/setMode', { sessionId, mode: zcodeModeFor(opts.permissionMode) })
-          .catch(() => undefined);
-
-        // Buffer events between subscription setup and generator consumption.
-        const queue: AppServerSessionEvent[] = [];
-        let wake: (() => void) | undefined;
-        const waiters: Array<() => void> = [];
-        const unsubscribe = client.subscribe(sessionId, (event) => {
-          queue.push(event);
-          while (waiters.length) waiters.shift()!();
-        });
-        try {
+        if (sessionId) {
+          await client
+            .request('session/setMode', { sessionId, mode: zcodeModeFor(opts.permissionMode) })
+            .catch(() => undefined);
+          queue = [];
+          waiters = [];
+          unsubscribe = client.subscribe(sessionId, (event) => {
+            queue.push(event);
+            while (waiters.length) waiters.shift()!();
+          });
           await client.request('session/subscribe', {
             sessionId,
             deliveryKind: 'desktop-continuous',
           });
-          // The translator emits the `system` event from the turn.started
-          // notification right after session/send.
-          log.info('agent', 'app-server-send', {
+        } else {
+          const fresh = await startSession();
+          sessionId = fresh.sessionId;
+          unsubscribe = fresh.unsubscribe;
+          queue = fresh.queue;
+          waiters = fresh.waiters;
+        }
+
+        // The translator emits the `system` event from the turn.started
+        // notification right after session/send.
+        log.info('agent', 'app-server-send', {
+          sessionId,
+          hasResume: Boolean(opts.sessionId),
+          promptChars: prompt.length,
+        });
+        if (desktopSync) {
+          upsertDesktopTask({
             sessionId,
-            hasResume: Boolean(opts.sessionId),
-            promptChars: prompt.length,
+            workspacePath: opts.cwd!,
+            title: taskTitle(opts.prompt),
+            status: 'running',
           });
+        }
+        try {
+          await client.request('session/send', { sessionId, content: prompt });
+        } catch (err) {
+          if (!isModelUnavailableError((err as Error).message)) throw err;
+          recoveredFromSessionId = sessionId;
+          log.warn('agent', 'app-server-model-recover', {
+            fromSession: sessionId,
+            reason: (err as Error).message.slice(0, 120),
+          });
+          unsubscribe();
+          const fresh = await startSession();
+          sessionId = fresh.sessionId;
+          unsubscribe = fresh.unsubscribe;
+          queue = fresh.queue;
+          waiters = fresh.waiters;
           if (desktopSync) {
             upsertDesktopTask({
               sessionId,
@@ -190,57 +252,84 @@ export class ZcodeAdapter implements AgentAdapter {
             });
           }
           await client.request('session/send', { sessionId, content: prompt });
+        }
 
-          while (true) {
-            while (queue.length === 0) {
-              await Promise.race([
-                new Promise<void>((resolve) => {
-                  waiters.push(resolve);
-                  wake = resolve;
-                }),
-                client.nextCrash.then(() => {
-                  throw new Error("zcode app-server process exited mid-turn");
-                }),
-              ]);
-              wake = undefined;
-            }
-            const event = queue.shift()!;
-            if (event.type === 'turn.completed') {
-              yield* translateEvent(event);
-              // Sync BEFORE the terminal done yield — consumers stop pulling
-              // events at done, so anything after that yield never runs.
-              if (desktopSync) {
-                upsertDesktopTask({
-                  sessionId,
-                  workspacePath: opts.cwd!,
-                  title: taskTitle(opts.prompt),
-                  status: 'completed',
-                });
-              }
-              yield { type: 'done', sessionId, terminationReason: 'normal' };
-              return;
-            }
-            if (event.type === 'turn.failed' || event.type === 'turn.cancelled') {
-              if (desktopSync) {
-                upsertDesktopTask({
-                  sessionId,
-                  workspacePath: opts.cwd!,
-                  title: taskTitle(opts.prompt),
-                  status: 'error',
-                });
-              }
-              yield {
-                type: 'error',
-                message: `zcode turn ${event.type === 'turn.failed' ? 'failed' : 'cancelled'}: ${JSON.stringify(event.payload ?? {}).slice(0, 300)}`,
-                terminationReason: 'interrupted',
-              };
-              return;
-            }
-            yield* translateEvent(event);
+        while (true) {
+          while (queue.length === 0) {
+            await Promise.race([
+              new Promise<void>((resolve) => {
+                waiters.push(resolve);
+                wake = resolve;
+              }),
+              client.nextCrash.then(() => {
+                throw new Error("zcode app-server process exited mid-turn");
+              }),
+            ]);
+            wake = undefined;
           }
-        } finally {
-          unsubscribe();
-          markSettled();
+          const event = queue.shift()!;
+          if (event.type === 'turn.completed') {
+            yield* translateEvent(event);
+            // Sync BEFORE the terminal done yield — consumers stop pulling
+            // events at done, so anything after that yield never runs.
+            if (desktopSync) {
+              upsertDesktopTask({
+                sessionId,
+                workspacePath: opts.cwd!,
+                title: taskTitle(opts.prompt),
+                status: 'completed',
+              });
+            }
+            yield { type: 'done', sessionId, terminationReason: 'normal' };
+            return;
+          }
+          if (event.type === 'turn.failed' || event.type === 'turn.cancelled') {
+            const failureDetail = JSON.stringify(event.payload ?? {});
+            if (
+              event.type === 'turn.failed' &&
+              isModelUnavailableError(failureDetail) &&
+              !recoveredFromSessionId &&
+              opts.sessionId
+            ) {
+              // Model broke inside a resumed session — replay in a fresh one.
+              recoveredFromSessionId = sessionId;
+              log.warn('agent', 'app-server-model-recover', {
+                fromSession: sessionId,
+                reason: 'turn.failed model unavailable',
+              });
+              unsubscribe();
+              const fresh = await startSession();
+              sessionId = fresh.sessionId;
+              unsubscribe = fresh.unsubscribe;
+              queue = fresh.queue;
+              waiters = fresh.waiters;
+              if (desktopSync) {
+                upsertDesktopTask({
+                  sessionId,
+                  workspacePath: opts.cwd!,
+                  title: taskTitle(opts.prompt),
+                  status: 'running',
+                });
+              }
+              await client.request('session/send', { sessionId, content: prompt });
+              continue;
+            }
+            if (desktopSync) {
+              upsertDesktopTask({
+                sessionId,
+                workspacePath: opts.cwd!,
+                title: taskTitle(opts.prompt),
+                status: 'error',
+              });
+            }
+            yield {
+              type: 'error',
+              message: `zcode turn ${event.type === 'turn.failed' ? 'failed' : 'cancelled'}: ${failureDetail.slice(0, 300)}`,
+              terminationReason: 'interrupted',
+            };
+            return;
+          }
+          yield* translateEvent(event);
         }
       } catch (err) {
         yield {
@@ -249,6 +338,7 @@ export class ZcodeAdapter implements AgentAdapter {
           terminationReason: 'failed',
         };
       } finally {
+        unsubscribe?.();
         markSettled();
       }
     })();
