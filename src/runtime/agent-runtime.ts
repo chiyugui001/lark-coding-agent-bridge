@@ -54,6 +54,7 @@ export function createRuntimeAgent(
     return new ZcodeAdapter({
       ...(profileConfig.zcode?.binaryPath ? { binary: profileConfig.zcode.binaryPath } : {}),
       ...(profileConfig.zcode?.transport ? { transport: profileConfig.zcode.transport } : {}),
+      ...(profileConfig.zcode?.desktopSync === false ? { desktopSync: false } : {}),
       larkChannel,
     });
   }

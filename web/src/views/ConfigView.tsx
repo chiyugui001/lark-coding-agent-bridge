@@ -86,6 +86,10 @@ export function ConfigView({ profile }: { profile: string }) {
         runIdleTimeoutMinutes: cfg.runIdleTimeoutMinutes,
         requireMentionInGroup: cfg.requireMentionInGroup,
         larkCliIdentity: cfg.larkCliIdentity,
+        permissions: cfg.permissions,
+        memory: cfg.memory,
+        sessionScope: cfg.sessionScope,
+        ...(cfg.zcode ? { zcode: cfg.zcode } : {}),
       });
       setCfg(next);
       toast.success(next.live ? "已保存，立即生效" : "已保存，下次启动该 profile 生效");
@@ -191,6 +195,46 @@ export function ConfigView({ profile }: { profile: string }) {
         cfg={cfg.meeting}
         onChange={(next) => set("meeting", next)}
       />
+
+      <Card>
+        <CardHeader><CardTitle>权限与隔离</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <Field label="默认权限" hint="所有用户的 agent 权限档位（写入/执行能力）">
+            <SelectRow value={cfg.permissions.defaultAccess} onChange={(v) => set("permissions", { ...cfg.permissions, defaultAccess: v as ConfigData["permissions"]["defaultAccess"] })}
+              options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
+          </Field>
+          <Field label="权限上限" hint="任何用户（含 owner/管理员/覆盖表）不能超过此档">
+            <SelectRow value={cfg.permissions.maxAccess} onChange={(v) => set("permissions", { ...cfg.permissions, maxAccess: v as ConfigData["permissions"]["maxAccess"] })}
+              options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
+          </Field>
+          <Field label="管理员权限" hint="access.admins 成员的档位；默认跟随「默认权限」">
+            <SelectRow value={cfg.permissions.adminAccess ?? "default"} onChange={(v) => set("permissions", { ...cfg.permissions, adminAccess: v === "default" ? null : v as ConfigData["permissions"]["adminAccess"] })}
+              options={[["default", "跟随默认权限"], ["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
+          </Field>
+          <UserAccessEditor
+            userAccess={cfg.permissions.userAccess}
+            maxAccess={cfg.permissions.maxAccess}
+            onChange={(next) => set("permissions", { ...cfg.permissions, userAccess: next })} />
+          <Separator />
+          <ToggleRow label="每用户记忆" hint="每个用户独立的跨会话记忆文件，注入为 <user_memory> 块" checked={cfg.memory.enabled}
+            onChange={(v) => set("memory", { enabled: v })} />
+          <Field label="群聊会话隔离" hint="chat+user 时群聊里每个成员各自一条会话上下文">
+            <SelectRow value={cfg.sessionScope} onChange={(v) => set("sessionScope", v as ConfigData["sessionScope"])}
+              options={[["chat", "按聊天共享（默认）"], ["chat+user", "按用户隔离"]]} />
+          </Field>
+          {cfg.agentKind === "zcode" && cfg.zcode && (
+            <>
+              <Separator />
+              <Field label="ZCode 传输" hint="app-server 与桌面版共用引擎、会话互通；cli 为一次性进程">
+                <SelectRow value={cfg.zcode.transport} onChange={(v) => set("zcode", { ...cfg.zcode!, transport: v as "app-server" | "cli" })}
+                  options={[["app-server", "app-server（推荐）"], ["cli", "cli（保守）"]]} />
+              </Field>
+              <ToggleRow label="桌面端任务同步" hint="桥接会话镜像到 ZCode 桌面版任务列表（含未读标记）" checked={cfg.zcode.desktopSync}
+                onChange={(v) => set("zcode", { ...cfg.zcode!, desktopSync: v })} />
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle>访问控制</CardTitle></CardHeader>
@@ -938,6 +982,63 @@ function AccessList({ label, placeholder, ids, onAdd, onRemove }: {
       <div className="flex gap-2">
         <Input placeholder={placeholder} value={draft} onChange={(e) => setDraft(e.target.value)} />
         <Button variant="outline" onClick={() => { onAdd(draft); setDraft(""); }}>添加</Button>
+      </div>
+    </div>
+  );
+}
+
+function UserAccessEditor({ userAccess, maxAccess, onChange }: {
+  userAccess: Record<string, ConfigData["permissions"]["userAccess"][string]>;
+  maxAccess: ConfigData["permissions"]["maxAccess"];
+  onChange: (next: Record<string, ConfigData["permissions"]["userAccess"][string]>) => void;
+}) {
+  const [newId, setNewId] = useState("");
+  const [newMode, setNewMode] = useState<ConfigData["permissions"]["userAccess"][string]>("full");
+  const order: Record<string, number> = { "read-only": 0, workspace: 1, full: 2 };
+  const cap = order[maxAccess];
+  const options = ([["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] as const).filter(
+    ([m]) => order[m] <= cap,
+  );
+  const entries = Object.entries(userAccess);
+  const add = () => {
+    const id = newId.trim();
+    if (!id.startsWith("ou_") || order[newMode] > cap) return;
+    onChange({ ...userAccess, [id]: newMode });
+    setNewId("");
+  };
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm">按用户权限覆盖（open_id → 档位）</Label>
+      <p className="text-xs text-muted-foreground">显式覆盖优先级最高（对 owner 也生效）；不在此表的用户按默认/管理员档位解析。</p>
+      {entries.length > 0 && (
+        <div className="space-y-1.5">
+          {entries.map(([id, mode]) => (
+            <div key={id} className="flex items-center gap-2">
+              <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{id}</code>
+              <Select value={mode} onValueChange={(v) => onChange({ ...userAccess, [id]: v as typeof mode })}>
+                <SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {options.map(([m, label]) => <SelectItem key={m} value={m}>{label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="ghost" size="sm" onClick={() => {
+                const next = { ...userAccess };
+                delete next[id];
+                onChange(next);
+              }}>移除</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Input className="h-8 flex-1" placeholder="ou_...（open_id）" value={newId} onChange={(e) => setNewId(e.target.value)} />
+        <Select value={newMode} onValueChange={(v) => setNewMode(v as typeof newMode)}>
+          <SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {options.map(([m, label]) => <SelectItem key={m} value={m}>{label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" onClick={add}>添加</Button>
       </div>
     </div>
   );

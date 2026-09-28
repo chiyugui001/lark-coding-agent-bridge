@@ -243,3 +243,33 @@ export async function savePermissionsConfig(
     return permissions;
   });
 }
+
+/**
+ * Mutate misc profile-level runtime options (per-user memory, group session
+ * scope, zcode transport/desktopSync) under the config file lock. Mirrors
+ * {@link savePermissionsConfig}; permissions have their own dedicated saver.
+ */
+export async function saveProfileOptions(
+  state: MutableProfileState,
+  mutate: (profile: ProfileConfig) => ProfileConfig,
+): Promise<ProfileConfig> {
+  return withConfigFileLock(state.configPath, async () => {
+    const root = await loadRootConfig(state.configPath);
+    if (!root) {
+      const profile = mutate(state.profileConfig);
+      state.profileConfig = profile;
+      await saveConfig(state.cfg, state.configPath);
+      return profile;
+    }
+
+    const current = root.profiles[state.profile];
+    if (!current) throw new Error(`profile not found: ${state.profile}`);
+    const profile = mutate(current);
+    root.profiles[state.profile] = profile;
+    await saveRootConfig(root, state.configPath);
+    state.profileConfig = root.profiles[state.profile]!;
+    state.cfg = runtimeProfileConfig(root, state.profile);
+    log.info('config-ops', 'profile-options-mutated', { profile: state.profile });
+    return profile;
+  });
+}

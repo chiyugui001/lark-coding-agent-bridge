@@ -2,6 +2,7 @@ export type AgentKind = "claude" | "codex" | "zcode";
 export type ProfileMode = "personal" | "team";
 export type LarkCliIdentity = "bot-only" | "user-default";
 export type MessageReply = "card" | "markdown" | "text";
+export type AccessModeLite = "read-only" | "workspace" | "full";
 export type CotMessages = "off" | "brief" | "detailed";
 
 export interface Status {
@@ -49,6 +50,15 @@ export interface ConfigView {
   requireMentionInGroup: boolean;
   larkCliIdentity: LarkCliIdentity;
   meeting: MeetingConfig;
+  permissions: {
+    defaultAccess: AccessModeLite;
+    maxAccess: AccessModeLite;
+    adminAccess: AccessModeLite | null;
+    userAccess: Record<string, AccessModeLite>;
+  };
+  memory: { enabled: boolean };
+  sessionScope: "chat" | "chat+user";
+  zcode: { transport: "app-server" | "cli"; desktopSync: boolean } | null;
   access: {
     allowedUsers: string[];
     allowedChats: string[];

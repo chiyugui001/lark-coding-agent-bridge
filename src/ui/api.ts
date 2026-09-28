@@ -17,10 +17,13 @@ import { describeMeetingError, type MeetingManager, type MeetingPushHealth } fro
 import type { MeetingSessionStatus } from '../meeting/session';
 import { resolveAppPaths } from '../config/app-paths';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
+import type { ProfileConfig } from '../config/profile-schema';
 import {
   applyProfileLarkCliIdentity,
   saveAccessConfig,
+  savePermissionsConfig,
   savePreferencesConfig,
+  saveProfileOptions,
   type MutableProfileState,
 } from '../config/config-ops';
 import {
@@ -72,6 +75,15 @@ export interface ConfigView {
      * requireMentionInGroup. Absent chats follow the global setting. */
     chatRequireMention: Record<string, boolean>;
   };
+  permissions: {
+    defaultAccess: 'read-only' | 'workspace' | 'full';
+    maxAccess: 'read-only' | 'workspace' | 'full';
+    adminAccess: 'read-only' | 'workspace' | 'full' | null;
+    userAccess: Record<string, 'read-only' | 'workspace' | 'full'>;
+  };
+  memory: { enabled: boolean };
+  sessionScope: 'chat' | 'chat+user';
+  zcode: { transport: 'app-server' | 'cli'; desktopSync: boolean } | null;
   /** True when edits to this profile apply live (its process hosts the UI). */
   live: boolean;
 }
@@ -93,6 +105,20 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
     requireMentionInGroup: getRequireMentionInGroup(state.cfg),
     larkCliIdentity: state.profileConfig.larkCli.identityPreset,
     meeting: state.profileConfig.meeting,
+    permissions: {
+      defaultAccess: state.profileConfig.permissions.defaultAccess,
+      maxAccess: state.profileConfig.permissions.maxAccess,
+      adminAccess: state.profileConfig.permissions.adminAccess ?? null,
+      userAccess: { ...(state.profileConfig.permissions.userAccess ?? {}) },
+    },
+    memory: { enabled: state.profileConfig.memory.enabled },
+    sessionScope: state.profileConfig.sessionScope,
+    zcode: state.profileConfig.agentKind === 'zcode'
+      ? {
+          transport: state.profileConfig.zcode?.transport ?? 'app-server',
+          desktopSync: state.profileConfig.zcode?.desktopSync !== false,
+        }
+      : null,
     access: {
       allowedUsers: state.profileConfig.access.allowedUsers,
       allowedChats: state.profileConfig.access.allowedChats,
@@ -186,6 +212,7 @@ function parseMeetingBody(body: unknown, current: MeetingConfig): MeetingConfig 
 }
 
 interface ParsedConfig {
+  profileExtras: ProfileExtras | undefined;
   mode: ProfileMode;
   meeting: MeetingConfig;
   larkCliIdentity: LarkCliIdentityPreset;
@@ -201,6 +228,78 @@ interface ParsedConfig {
  * `submitConfig` validation/clamps exactly. Unspecified fields keep their
  * current value, so the SPA can PATCH just what changed.
  */
+type AccessModeLite = 'read-only' | 'workspace' | 'full';
+
+interface ProfileExtras {
+  permissions: { defaultAccess: AccessModeLite; maxAccess: AccessModeLite; adminAccess: AccessModeLite | null; userAccess: Record<string, AccessModeLite> };
+  memory: { enabled: boolean };
+  sessionScope: 'chat' | 'chat+user';
+  zcode: { transport: 'app-server' | 'cli'; desktopSync: boolean } | null;
+}
+
+const isAccessModeLite = (v: unknown): v is AccessModeLite =>
+  v === 'read-only' || v === 'workspace' || v === 'full';
+
+/** Parse the profile-level extras; undefined fields keep current values. */
+function parseProfileExtras(
+  fv: Record<string, unknown>,
+  current: ProfileConfig,
+): ProfileExtras | undefined {
+  if (fv.permissions === undefined && fv.memory === undefined && fv.sessionScope === undefined && fv.zcode === undefined) {
+    return undefined;
+  }
+  const permRaw = asRecord(fv.permissions);
+  const maxAccess = isAccessModeLite(permRaw?.maxAccess) ? permRaw.maxAccess : current.permissions.maxAccess;
+  const defaultAccess = isAccessModeLite(permRaw?.defaultAccess) ? permRaw.defaultAccess : current.permissions.defaultAccess;
+  const adminAccess =
+    permRaw?.adminAccess === null
+      ? null
+      : isAccessModeLite(permRaw?.adminAccess)
+        ? permRaw.adminAccess
+        : (current.permissions.adminAccess ?? null);
+  const userAccess: Record<string, AccessModeLite> = {};
+  const userRaw = asRecord(permRaw?.userAccess);
+  if (userRaw) {
+    for (const [id, mode] of Object.entries(userRaw)) {
+      if (id.trim() && isAccessModeLite(mode)) userAccess[id] = mode;
+    }
+  }
+  const memRaw = asRecord(fv.memory);
+  const memory = { enabled: typeof memRaw?.enabled === 'boolean' ? memRaw.enabled : current.memory.enabled };
+  const sessionScope = fv.sessionScope === 'chat+user' || fv.sessionScope === 'chat' ? fv.sessionScope : current.sessionScope;
+  const zcRaw = asRecord(fv.zcode);
+  const zcode =
+    current.agentKind === 'zcode' && zcRaw
+      ? {
+          transport: zcRaw.transport === 'cli' ? ('cli' as const) : ('app-server' as const),
+          desktopSync: typeof zcRaw.desktopSync === 'boolean' ? zcRaw.desktopSync : (current.zcode?.desktopSync !== false),
+        }
+      : null;
+  return { permissions: { defaultAccess, maxAccess, adminAccess, userAccess }, memory, sessionScope, zcode };
+}
+
+/** Persist the parsed extras via the dedicated savers (validated there). */
+async function applyProfileExtras(state: MutableProfileState, extras: ProfileExtras | undefined): Promise<void> {
+  if (!extras) return;
+  await savePermissionsConfig(state, () => ({
+    defaultAccess: extras.permissions.defaultAccess,
+    maxAccess: extras.permissions.maxAccess,
+    ...(extras.permissions.adminAccess ? { adminAccess: extras.permissions.adminAccess } : {}),
+    ...(Object.keys(extras.permissions.userAccess).length > 0
+      ? { userAccess: extras.permissions.userAccess }
+      : {}),
+    ...(state.profileConfig.permissions.claude ? { claude: state.profileConfig.permissions.claude } : {}),
+  }));
+  await saveProfileOptions(state, (profile) => ({
+    ...profile,
+    memory: { ...profile.memory, enabled: extras.memory.enabled },
+    sessionScope: extras.sessionScope,
+    ...(profile.agentKind === 'zcode' && extras.zcode
+      ? { zcode: { ...(profile.zcode ?? {}), transport: extras.zcode.transport, desktopSync: extras.zcode.desktopSync } }
+      : {}),
+  }));
+}
+
 function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfig {
   const fv = asRecord(body);
   const agentKind = state.profileConfig.agentKind;
@@ -255,6 +354,7 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
       : getRequireMentionInGroup(state.cfg);
 
   const meeting = parseMeetingBody(fv.meeting, state.profileConfig.meeting);
+  const profileExtras = parseProfileExtras(fv, state.profileConfig);
 
   const nextEffectiveIdentity: LarkCliIdentityPreset = mode === 'team' ? 'bot-only' : larkCliIdentity;
   const previousEffectiveIdentity = effectiveLarkCliIdentity(state.profileConfig);
@@ -262,6 +362,7 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
   return {
     mode,
     meeting,
+    profileExtras,
     larkCliIdentity,
     requireMentionInGroup,
     nextEffectiveIdentity,
@@ -302,6 +403,7 @@ export async function applyConfig(rt: UiRuntime, body: unknown): Promise<ConfigV
       p.mode,
       p.meeting,
     );
+    await applyProfileExtras(rt, p.profileExtras);
   } catch (err) {
     if (identityApplied) {
       await applyProfileLarkCliIdentity(rt, p.previousEffectiveIdentity).catch(() =>
@@ -336,6 +438,7 @@ export async function applyConfigToDisk(
       p.mode,
       p.meeting,
     );
+    await applyProfileExtras(state, p.profileExtras);
   } catch (err) {
     throw new ApiError(500, `保存失败：${err instanceof Error ? err.message : String(err)}`);
   }

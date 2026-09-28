@@ -63,6 +63,8 @@ export interface ZcodeConfig {
   binaryPath?: string;
   /** `app-server` (default, persistent ZCode Protocol process) or `cli` (one-shot per run). */
   transport?: 'app-server' | 'cli';
+  /** Mirror bridge sessions into the ZCode desktop app's task list. Default true. */
+  desktopSync?: boolean;
 }
 
 export interface AttachmentConfig {
@@ -433,6 +435,7 @@ function normalizeZcode(input: ZcodeConfig): ZcodeConfig {
       ? { binaryPath: input.binaryPath.trim() }
       : {}),
     ...(transport ? { transport } : {}),
+    ...(typeof input.desktopSync === 'boolean' ? { desktopSync: input.desktopSync } : {}),
   };
 }
 
