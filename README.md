@@ -34,6 +34,11 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+## Per-user permissions and memory
+
+- **Per-user access**: `permissions.userAccess` (open_id → read-only/workspace/full) overrides; the owner defaults to `maxAccess`; admins can be raised via `permissions.adminAccess` (defaults to `defaultAccess` — being an admin never changes agent permissions by itself). Everything stays clamped by `maxAccess`. Admins can adjust from chat with `/grant <open_id|me> <read-only|workspace|full|reset>`; `/status` shows your effective mode.
+- **Per-user memory**: with `memory.enabled: true`, each user gets a memory file at `<profileDir>/memory/<open_id>.md`, injected as a `<user_memory>` block. Write-privileged users let the agent maintain the file directly; read-only users manage theirs with `/memory` (preview/add/clear).
+- **Group-chat session isolation**: `sessionScope: "chat+user"` keys group sessions per sender (default `chat` shares one session per chat); DMs are unaffected.
 ## First run
 
 ```bash
