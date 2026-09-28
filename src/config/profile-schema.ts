@@ -51,6 +51,13 @@ export interface CodexConfig {
   ignoreRules?: boolean;
 }
 
+/** Per-user persistent memory files under `<profileDir>/memory/<open_id>.md`. */
+export interface MemoryConfig {
+  enabled: boolean;
+  /** Max memory bytes injected into one prompt; excess is truncated. */
+  injectMaxBytes?: number;
+}
+
 export interface ZcodeConfig {
   /** Executable or `zcode.cjs` bundle path. Defaults to the desktop install. */
   binaryPath?: string;
@@ -168,6 +175,7 @@ export interface ProfileConfig {
   permissionSource?: PermissionSource;
   codex?: CodexConfig;
   zcode?: ZcodeConfig;
+  memory: MemoryConfig;
   attachments: AttachmentConfig;
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
@@ -249,6 +257,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissions?: Partial<PermissionConfig>;
     codex?: CodexConfig & { flags?: unknown };
     zcode?: ZcodeConfig;
+    memory?: Partial<MemoryConfig>;
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
@@ -295,6 +304,12 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
     ...(raw.zcode ? { zcode: normalizeZcode(raw.zcode) } : {}),
+    memory: {
+      enabled: raw.memory?.enabled === true,
+      ...(typeof raw.memory?.injectMaxBytes === 'number' && raw.memory.injectMaxBytes > 0
+        ? { injectMaxBytes: raw.memory.injectMaxBytes }
+        : {}),
+    },
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),

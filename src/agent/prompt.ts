@@ -81,11 +81,33 @@ export interface BuildAgentPromptInput {
   interactiveCards?: BridgePromptInteractiveCard[];
   comment?: BridgePromptComment;
   attachments?: BridgePromptAttachment[];
+  /**
+   * Per-user persistent memory content; rendered as a <user_memory> block
+   * right after bridge_context. `memoryFilePath` (write-privileged users
+   * only) tells the agent it may edit the file directly.
+   */
+  userMemory?: {
+    content: string;
+    memoryFilePath?: string;
+  };
 }
 
 export function buildAgentPrompt(input: BuildAgentPromptInput): string {
   const sections = [
     promptSection('bridge_context', input.context),
+    input.userMemory && input.userMemory.content
+      ? promptSection('user_memory', {
+          note: '该用户跨会话的持久记忆。仅对此用户可见。',
+          ...(input.userMemory.memoryFilePath
+            ? {
+                note_can_edit:
+                  '你可以用文件工具更新这个记忆文件（追加/修改/精简），它会在该用户之后每轮注入。',
+                memory_file: input.userMemory.memoryFilePath,
+              }
+            : {}),
+          memory: input.userMemory.content,
+        })
+      : undefined,
     input.instructions && input.instructions.length > 0
       ? promptSection('bridge_instructions', input.instructions)
       : undefined,

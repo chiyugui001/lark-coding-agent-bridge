@@ -29,6 +29,9 @@ import {
 } from '../card/run-state';
 import { renderText } from '../card/text-renderer';
 import { tryHandleCommand, type Controls } from '../commands';
+import { MemoryStore } from './memory-store';
+import { resolveUserAccessMode } from '../config/permissions';
+import { resolveAppPaths } from '../config/app-paths';
 import type { AppConfig } from '../config/schema';
 import {
   getAgentStopGraceMs,
@@ -914,6 +917,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       ]
     : undefined;
 
+  const userMemory = await loadUserMemory(controls, batch[0]?.senderId ?? '');
+
   const prompt = buildPrompt(
     batch,
     attachments,
@@ -921,6 +926,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     topicContext,
     channel.botIdentity,
     extraInstructions,
+    userMemory,
   );
   log.info('prompt', 'built', {
     promptChars: prompt.length,
@@ -1804,6 +1810,7 @@ function buildPrompt(
   topicContext: QuotedContext[] = [],
   botIdentity?: { openId: string; name?: string },
   extraInstructions?: string[],
+  userMemory?: { content: string; memoryFilePath?: string },
 ): string {
   const first = batch[0];
   if (!first) return '';
@@ -1849,6 +1856,7 @@ function buildPrompt(
         : BRIDGE_AGENT_INSTRUCTIONS,
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
+    ...(userMemory && userMemory.content ? { userMemory } : {}),
     quotedMessages: quotes.map(toPromptQuote),
     interactiveCards: batch.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
@@ -1969,4 +1977,41 @@ function parseJsonOrRaw(input: string): unknown {
 
 function isDefined<T>(value: T | undefined): value is T {
   return value !== undefined;
+}
+/**
+ * Load the sender's persistent memory when the profile enables it. For
+ * write-privileged users the memory file path is disclosed so the agent
+ * can maintain it directly; read-only users manage it via /memory.
+ */
+async function loadUserMemory(
+  controls: Controls,
+  senderId: string,
+): Promise<{ content: string; memoryFilePath?: string } | undefined> {
+  if (!controls.profileConfig.memory.enabled || !senderId) return undefined;
+  try {
+    const appPaths = resolveAppPaths({
+      rootDir: dirname(controls.configPath),
+      profile: controls.profile,
+    });
+    const store = new MemoryStore(
+      join(appPaths.profileDir, 'memory'),
+      controls.profileConfig.memory.injectMaxBytes,
+    );
+    const content = await store.getForInjection(senderId);
+    if (!content) return undefined;
+    const resolved = resolveUserAccessMode({
+      permissions: controls.profileConfig.permissions,
+      admins: controls.profileConfig.access.admins,
+      senderId,
+      isOwner: controls.botOwnerId === senderId,
+    });
+    const writable = resolved.mode === 'workspace' || resolved.mode === 'full';
+    return {
+      content,
+      ...(writable ? { memoryFilePath: store.pathFor(senderId) } : {}),
+    };
+  } catch (err) {
+    log.warn('prompt', 'memory-load-failed', { message: (err as Error).message });
+    return undefined;
+  }
 }

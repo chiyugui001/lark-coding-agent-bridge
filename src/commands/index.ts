@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { LarkChannel, NormalizedMessage } from '@larksuite/channel';
 import { agentCapability } from '../agent/capability';
 import { DEFAULT_MODEL, normalizeModelSelection, supportedModels } from '../agent/models';
@@ -43,6 +43,7 @@ import type {
 } from '../config/profile-schema';
 import { effectiveLarkCliIdentity } from '../config/profile-schema';
 import { resolveAppPaths } from '../config/app-paths';
+import { MemoryStore } from '../bot/memory-store';
 import { accessToClaudePermissionMode, resolveUserAccessMode } from '../config/permissions';
 import {
   canRunAdminCommand,
@@ -187,6 +188,7 @@ const handlers: Record<string, Handler> = {
   '/remove': handleRemove,
   '/meeting': handleMeeting,
   '/grant': handleGrant,
+  '/memory': handleMemory,
 };
 
 /**
@@ -916,6 +918,63 @@ async function handleGrant(args: string, ctx: CommandContext): Promise<void> {
   await reply(ctx, `✅ ${label}。下一轮对话生效。`);
 }
 
+
+/**
+ * `/memory` — manage the sender's own persistent memory file.
+ *   /memory              preview your memory
+ *   /memory add <text>   append a line
+ *   /memory clear        empty it
+ */
+async function handleMemory(args: string, ctx: CommandContext): Promise<void> {
+  if (!ctx.controls.profileConfig.memory.enabled) {
+    await reply(ctx, '记忆功能未启用（profile 配置 memory.enabled）。');
+    return;
+  }
+  const store = memoryStoreFor(ctx);
+  const sub = args.trim().split(/\s+/)[0] ?? '';
+  try {
+    if (sub === '') {
+      const content = await store.get(ctx.msg.senderId);
+      await reply(
+        ctx,
+        content
+          ? `你的记忆（${content.length} 字符）:\n\n${content.slice(0, 1500)}${content.length > 1500 ? '\n…(截断)' : ''}`
+          : '你还没有记忆。用 `/memory add <内容>` 沉淀。',
+      );
+      return;
+    }
+    if (sub === 'add') {
+      const text = args.trim().slice(3).trim();
+      if (!text) {
+        await reply(ctx, '用法: `/memory add <内容>`');
+        return;
+      }
+      await store.append(ctx.msg.senderId, text);
+      await reply(ctx, '✅ 已追加到你的记忆。');
+      return;
+    }
+    if (sub === 'clear') {
+      await store.clear(ctx.msg.senderId);
+      await reply(ctx, '✅ 已清空你的记忆。');
+      return;
+    }
+    await reply(ctx, '用法: `/memory` | `/memory add <内容>` | `/memory clear`');
+  } catch (err) {
+    await reply(ctx, `❌ 记忆操作失败: ${(err as Error).message}`);
+  }
+}
+
+
+function memoryStoreFor(ctx: CommandContext): MemoryStore {
+  const appPaths = resolveAppPaths({
+    rootDir: dirname(ctx.controls.configPath),
+    profile: ctx.controls.profile,
+  });
+  return new MemoryStore(
+    join(appPaths.profileDir, 'memory'),
+    ctx.controls.profileConfig.memory.injectMaxBytes,
+  );
+}
 
 async function handleStop(args: string, ctx: CommandContext): Promise<void> {
   const targetScope = args.trim();
