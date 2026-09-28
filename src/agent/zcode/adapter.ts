@@ -117,9 +117,10 @@ export class ZcodeAdapter implements AgentAdapter {
       larkChannel: this.larkChannel,
     });
     const client = this.client;
+    const planMode = zcodeModeFor(opts.permissionMode) === 'plan';
     const prompt =
       this.transport === 'app-server'
-        ? buildZcodePrompt(opts.prompt, this.botIdentity)
+        ? buildZcodePrompt(opts.prompt, this.botIdentity, planMode)
         : prefixBridgeSystemPrompt(opts.prompt, this.botIdentity);
 
     // stop() may be called before the session id is known; share a holder.
@@ -593,6 +594,22 @@ function taskTitle(prompt: string): string {
  * zcode derives the session title from the start of the first input, so the
  * user message leads and the bridge system prompt is appended after it.
  */
-function buildZcodePrompt(prompt: string, identity: AgentBotIdentity | undefined): string {
-  return `${prompt}\n\n## bridge_system_prompt\n\n${buildBridgeSystemPrompt(identity)}`;
+function buildZcodePrompt(
+  prompt: string,
+  identity: AgentBotIdentity | undefined,
+  planMode = false,
+): string {
+  const planHint = planMode
+    ? [
+        '',
+        '## bridge_mode_notice',
+        '',
+        '当前为只读（plan）模式，写文件/执行命令会被拒绝，且没有交互式批准通道。',
+        '涉及写入或执行的任务：在回复第一句就说明自己是只读模式，不要先尝试执行；',
+        '然后把完整计划（步骤 + 要跑的确切命令）直接写在回复正文里交给用户，',
+        '并告知需要管理员提权（/grant）后重发才能执行。不要等待批准。',
+        '',
+      ].join('\n')
+    : '';
+  return `${prompt}\n\n## bridge_system_prompt\n\n${buildBridgeSystemPrompt(identity)}${planHint}`;
 }

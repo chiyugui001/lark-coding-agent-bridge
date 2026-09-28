@@ -64,12 +64,20 @@ export function* translateEvent(raw: unknown): Generator<AgentEvent> {
           return;
         case 'tool_call':
           if (payload.toolCallId && payload.toolName) {
+            const input = payload.input ? tryParseJson(payload.input) : payload.input;
             yield {
               type: 'tool_use',
               id: payload.toolCallId,
               name: payload.toolName,
-              input: payload.input ? tryParseJson(payload.input) : payload.input,
+              input,
             };
+            // Plan mode presents the plan via ExitPlanMode's input; surface
+            // it as reply text so the user actually sees the plan (the text
+            // stream alone usually ends at "计划如下：").
+            if (payload.toolName === 'ExitPlanMode') {
+              const plan = extractPlanText(input);
+              if (plan) yield { type: 'text', delta: `\n\n${plan}\n` };
+            }
           }
           return;
         default:
@@ -108,4 +116,12 @@ function tryParseJson(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+/** Pull the human-readable plan body out of an ExitPlanMode tool input. */
+function extractPlanText(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const plan = (input as { plan?: unknown }).plan;
+  if (typeof plan === 'string' && plan.trim()) return plan.trim();
+  return undefined;
 }
