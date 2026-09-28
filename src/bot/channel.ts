@@ -1052,7 +1052,19 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   const replyMode = getMessageReplyMode(controls.cfg);
   log.info('flush', 'reply-mode', { mode: replyMode });
-  const cotMessages = getCotMessages(controls.cfg);
+  const configuredCotMessages = getCotMessages(controls.cfg);
+  // Read-only users must not see process content (reasoning text, working
+  // text, tool details) — force the minimal phase-only process message.
+  const senderAccess = resolveUserAccessMode({
+    permissions: controls.profileConfig.permissions,
+    admins: controls.profileConfig.access.admins,
+    senderId: firstMsg.senderId,
+    isOwner: controls.botOwnerId === firstMsg.senderId,
+  });
+  const cotMessages =
+    configuredCotMessages !== 'off' && senderAccess.mode === 'read-only'
+      ? ('minimal' as const)
+      : configuredCotMessages;
   const cotEnabled = cotMessages !== 'off';
 
   // Re-read prefs on every flush so toggling /config mid-stream takes

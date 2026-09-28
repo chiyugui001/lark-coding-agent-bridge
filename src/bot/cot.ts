@@ -273,12 +273,23 @@ export async function consumeCotEvents(
   const toolBrief = new Map<string, { name: string; input: unknown }>();
   const reasoningMessageId = `reasoning-${publisher.runId}`;
   const finalStepId = `step-process-${publisher.runId}`;
+  const minimal = opts.detail === 'minimal';
+  let minimalThinkingStepOpen = false;
+  const thinkingStepId = `step-think-${publisher.runId}`;
 
   try {
     for await (const evt of events) {
       if (evt.type === 'system' || evt.type === 'usage') continue;
       if (evt.type === 'thinking') {
         closeTextIfNeeded();
+        if (minimal) {
+          // Phase bullets only — reasoning content stays private.
+          if (!minimalThinkingStepOpen) {
+            minimalThinkingStepOpen = true;
+            publisher.enqueue('STEP_STARTED', { stepId: thinkingStepId, stepName: '思考中' });
+          }
+          continue;
+        }
         if (!reasoningOpen) {
           reasoningOpen = true;
           publisher.enqueue('REASONING_START', { messageId: reasoningMessageId });
@@ -296,6 +307,10 @@ export async function consumeCotEvents(
       if (evt.type === 'tool_use') {
         closeReasoningIfNeeded();
         closeTextIfNeeded();
+        if (minimal && minimalThinkingStepOpen) {
+          minimalThinkingStepOpen = false;
+          publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
+        }
         const toolCallId = evt.id;
         const detailed = opts.detail === 'detailed';
         const showSummary = opts.detail === 'brief' || detailed;
@@ -325,15 +340,34 @@ export async function consumeCotEvents(
           role: 'tool',
           content: detailed
             ? truncateCot(evt.output ?? '', COT_TOOL_OUTPUT_MAX)
-            : brief
-              ? cotBriefToolTitle(brief.name, brief.input, evt.isError ? 'error' : 'done')
-              : '工具调用已完成',
+            : minimal
+              ? evt.isError
+                ? '工具调用失败'
+                : '工具调用已完成'
+              : brief
+                ? cotBriefToolTitle(brief.name, brief.input, evt.isError ? 'error' : 'done')
+                : '工具调用已完成',
         });
         toolBrief.delete(evt.id);
         continue;
       }
       if (evt.type === 'text') {
         closeReasoningIfNeeded();
+        if (minimal) {
+          // Working text stays private; the final reply carries the answer.
+          if (minimalThinkingStepOpen) {
+            minimalThinkingStepOpen = false;
+            publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
+          }
+          if (!textStepOpen) {
+            textStepOpen = true;
+            publisher.enqueue('STEP_STARTED', {
+              stepId: finalStepId,
+              stepName: '整理回复',
+            });
+          }
+          continue;
+        }
         if (!textStepOpen) {
           textStepOpen = true;
           publisher.enqueue('STEP_STARTED', {
@@ -356,6 +390,10 @@ export async function consumeCotEvents(
       if (evt.type === 'done' || evt.type === 'error') {
         closeReasoningIfNeeded();
         closeTextIfNeeded();
+        if (minimalThinkingStepOpen) {
+          minimalThinkingStepOpen = false;
+          publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
+        }
         if (textStepOpen) {
           publisher.enqueue('STEP_FINISHED', {
             stepId: finalStepId,

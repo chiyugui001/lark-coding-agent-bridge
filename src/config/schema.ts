@@ -67,7 +67,7 @@ export interface SecretsConfig {
  * `markdown`. See `messageReplyMigrated` for the auto-coercion logic.
  */
 export type MessageReplyMode = 'card' | 'markdown' | 'text';
-export type CotMessagesMode = 'off' | 'brief' | 'detailed';
+export type CotMessagesMode = 'off' | 'minimal' | 'brief' | 'detailed';
 
 /**
  * Access control settings. Empty lists are fail-closed in the v2 policy:
@@ -221,6 +221,7 @@ export function getShowToolCalls(cfg: AppConfig): boolean {
 
 export function getCotMessages(cfg: AppConfig): CotMessagesMode {
   const raw = cfg.preferences?.cotMessages;
+  if (raw === 'minimal') return 'minimal';
   if (raw === 'brief' || raw === 'simple') return 'brief';
   if (raw === 'detailed' || raw === 'on') return 'detailed';
   return 'off';

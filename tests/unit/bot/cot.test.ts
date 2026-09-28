@@ -3,6 +3,44 @@ import { consumeCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnsw
 import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
+describe('COT minimal mode (read-only users)', () => {
+  it('shows phase steps only — no reasoning text, working text, or tool details', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({
+      client,
+      chatId: 'oc_chat',
+      originMessageId: 'om_o',
+      runId: 'run-m',
+      scope: 'oc_chat',
+      inputPreview: 'p',
+    });
+    await publisher.start();
+    await consumeCotEvents(iterate([
+      { type: 'thinking', delta: 'The user wants to run graphify-sync.sh on D:/git/iot/sensor' },
+      { type: 'text', delta: '我先看一下当前目录里的同步脚本，确认远端更新要跑什么。' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'D:/git/iot/sensor/graphify-sync.sh' } },
+      { type: 'tool_result', id: 't1', output: '#!/bin/bash ... 102 repos', isError: false },
+      { type: 'text', delta: '当前是只读模式，计划如下' },
+      { type: 'done', terminationReason: 'normal' },
+    ]), publisher, { detail: 'minimal' });
+
+    const types = client.events.map((e) => e.event_type);
+    expect(types).not.toContain('REASONING_MESSAGE_CONTENT');
+    expect(types).not.toContain('TEXT_MESSAGE_CONTENT');
+    expect(types).not.toContain('TOOL_CALL_ARGS');
+    const allContent = client.events.map((e) => e.content).join(' ');
+    expect(allContent).not.toContain('graphify-sync.sh');
+    expect(allContent).not.toContain('The user wants');
+    expect(allContent).not.toContain('只读模式');
+    const steps = client.events
+      .filter((e) => e.event_type === 'STEP_STARTED')
+      .map((e) => JSON.parse(e.content).stepName);
+    expect(steps).toEqual(['理解用户问题', '思考中', '整理回复']);
+    const toolStart = client.events.find((e) => e.event_type === 'TOOL_CALL_START');
+    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ title: '正在调用工具' });
+  });
+});
+
 describe('COT event mapping', () => {
   it('publishes assistant progress text and brief tool summaries', async () => {
     const client = new FakeCotClient();
