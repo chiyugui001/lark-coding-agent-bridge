@@ -148,13 +148,13 @@ export function ConfigView({ profile }: { profile: string }) {
           </Field>
           <Field label="消息回复方式">
             <SelectRow value={cfg.messageReply} onChange={(v) => set("messageReply", v as ConfigData["messageReply"])}
-              options={[["markdown", "消息卡片（默认）"], ["text", "纯文本"]]} />
+              options={[["card", "卡片（白色富文本）"], ["markdown", "Markdown 消息"], ["text", "纯文本"]]} />
           </Field>
           <ToggleRow label="工具调用显示" hint="显示 bot 执行的命令与文件读写过程" checked={cfg.showToolCalls}
             onChange={(v) => set("showToolCalls", v)} />
           <Field label="COT 过程消息">
             <SelectRow value={cfg.cotMessages} onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
-              options={[["off", "关闭"], ["brief", "简略"], ["detailed", "详细"]]} />
+              options={[["off", "关闭"], ["minimal", "阶段条"], ["concise", "精简（只读默认）"], ["brief", "简略"], ["detailed", "详细"]]} />
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="并发上限（1-50）">

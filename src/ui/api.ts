@@ -226,7 +226,11 @@ function parseConfigBody(state: MutableProfileState, body: unknown): ParsedConfi
   const showToolCalls =
     typeof fv.showToolCalls === 'boolean' ? fv.showToolCalls : getShowToolCalls(state.cfg);
   const cotMessages: CotMessagesMode =
-    fv.cotMessages === 'brief' || fv.cotMessages === 'detailed' || fv.cotMessages === 'off'
+    fv.cotMessages === 'brief' ||
+    fv.cotMessages === 'detailed' ||
+    fv.cotMessages === 'off' ||
+    fv.cotMessages === 'minimal' ||
+    fv.cotMessages === 'concise'
       ? fv.cotMessages
       : getCotMessages(state.cfg);
   const maxConcurrentRuns =
