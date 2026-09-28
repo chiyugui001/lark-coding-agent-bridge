@@ -59,6 +59,7 @@ type StoredProfileConfig = Pick<
   | 'codex'
   | 'zcode'
   | 'memory'
+  | 'fsWhitelist'
   | 'sessionScope'
   | 'attachments'
   | 'comments'
@@ -101,6 +102,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.codex ? { codex: profile.codex } : {}),
     ...(profile.zcode ? { zcode: profile.zcode } : {}),
     memory: profile.memory,
+    ...(profile.fsWhitelist ? { fsWhitelist: profile.fsWhitelist } : {}),
     sessionScope: profile.sessionScope,
     attachments: profile.attachments,
     comments: {},

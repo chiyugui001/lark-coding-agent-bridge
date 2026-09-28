@@ -26,6 +26,8 @@ describe('root config serialization round-trip', () => {
     profile.memory = { enabled: true };
     profile.sessionScope = 'chat+user';
     profile.zcode = { transport: 'cli', desktopSync: false };
+    profile.fsWhitelist = { enabled: true, dirs: ['D:/git/iot/sensor'] };
+    profile.workspaces = { default: 'D:/git/iot/sensor' };
 
     writeFileSync(
       path,
@@ -44,10 +46,14 @@ describe('root config serialization round-trip', () => {
     expect(raw.profiles.p.memory).toEqual({ enabled: true });
     expect(raw.profiles.p.sessionScope).toBe('chat+user');
     expect(raw.profiles.p.zcode).toEqual({ transport: 'cli', desktopSync: false });
+    expect(raw.profiles.p.fsWhitelist).toEqual({ enabled: true, dirs: ['D:/git/iot/sensor'] });
+    expect(raw.profiles.p.workspaces).toEqual({ default: 'D:/git/iot/sensor' });
 
     const loaded = (await loadRootConfig(path))?.profiles.p;
     expect(loaded?.memory).toEqual({ enabled: true });
     expect(loaded?.sessionScope).toBe('chat+user');
     expect(loaded?.zcode).toEqual({ transport: 'cli', desktopSync: false });
+    expect(loaded?.fsWhitelist).toEqual({ enabled: true, dirs: ['D:/git/iot/sensor'] });
+    expect(loaded?.workspaces).toEqual({ default: 'D:/git/iot/sensor' });
   });
 });

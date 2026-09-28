@@ -86,6 +86,8 @@ export interface ConfigView {
   };
   memory: { enabled: boolean };
   sessionScope: 'chat' | 'chat+user';
+  fsWhitelist: { enabled: boolean; dirs: string[] };
+  workspace: string;
   zcode: { transport: 'app-server' | 'cli'; desktopSync: boolean } | null;
   /** True when edits to this profile apply live (its process hosts the UI). */
   live: boolean;
@@ -116,6 +118,11 @@ export function buildConfigView(state: MutableProfileState, live = false): Confi
     },
     memory: { enabled: state.profileConfig.memory.enabled },
     sessionScope: state.profileConfig.sessionScope,
+    fsWhitelist: {
+      enabled: state.profileConfig.fsWhitelist?.enabled === true,
+      dirs: state.profileConfig.fsWhitelist?.dirs ?? [],
+    },
+    workspace: state.profileConfig.workspaces.default ?? '',
     zcode: state.profileConfig.agentKind === 'zcode'
       ? {
           transport: state.profileConfig.zcode?.transport ?? 'app-server',
@@ -234,6 +241,8 @@ interface ParsedConfig {
 type AccessModeLite = 'read-only' | 'workspace' | 'full';
 
 interface ProfileExtras {
+  workspace: string | undefined;
+  fsWhitelist: { enabled: boolean; dirs: string[] } | undefined;
   permissions: { defaultAccess: AccessModeLite; maxAccess: AccessModeLite; adminAccess: AccessModeLite | null; userAccess: Record<string, AccessModeLite> };
   memory: { enabled: boolean };
   sessionScope: 'chat' | 'chat+user';
@@ -248,7 +257,7 @@ function parseProfileExtras(
   fv: Record<string, unknown>,
   current: ProfileConfig,
 ): ProfileExtras | undefined {
-  if (fv.permissions === undefined && fv.memory === undefined && fv.sessionScope === undefined && fv.zcode === undefined) {
+  if (fv.permissions === undefined && fv.memory === undefined && fv.sessionScope === undefined && fv.zcode === undefined && fv.workspace === undefined && fv.fsWhitelist === undefined) {
     return undefined;
   }
   const permRaw = asRecord(fv.permissions);
@@ -290,7 +299,17 @@ function parseProfileExtras(
       throw new ApiError(400, `用户 ${id.slice(-8)} 的档位不能超过权限上限（请先提高权限上限）`);
     }
   }
-  return { permissions: { defaultAccess, maxAccess, adminAccess, userAccess }, memory, sessionScope, zcode };
+  const workspace = typeof fv.workspace === 'string' ? fv.workspace.trim() : undefined;
+  const wlRaw = asRecord(fv.fsWhitelist);
+  const fsWhitelist = wlRaw
+    ? {
+        enabled: typeof wlRaw.enabled === 'boolean' ? wlRaw.enabled : current.fsWhitelist?.enabled === true,
+        dirs: Array.isArray(wlRaw.dirs)
+          ? wlRaw.dirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '')
+          : (current.fsWhitelist?.dirs ?? []),
+      }
+    : undefined;
+  return { workspace, fsWhitelist, permissions: { defaultAccess, maxAccess, adminAccess, userAccess }, memory, sessionScope, zcode };
 }
 
 /** Persist the parsed extras via the dedicated savers (validated there). */
@@ -309,6 +328,12 @@ async function applyProfileExtras(state: MutableProfileState, extras: ProfileExt
     ...profile,
     memory: { ...profile.memory, enabled: extras.memory.enabled },
     sessionScope: extras.sessionScope,
+    ...(extras.workspace !== undefined
+      ? { workspaces: extras.workspace ? { default: extras.workspace } : {} }
+      : {}),
+    ...(extras.fsWhitelist
+      ? { fsWhitelist: extras.fsWhitelist.dirs.length > 0 ? extras.fsWhitelist : { enabled: extras.fsWhitelist.enabled } }
+      : {}),
     ...(profile.agentKind === 'zcode' && extras.zcode
       ? { zcode: { ...(profile.zcode ?? {}), transport: extras.zcode.transport, desktopSync: extras.zcode.desktopSync } }
       : {}),
