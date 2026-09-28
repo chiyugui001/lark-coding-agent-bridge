@@ -34,6 +34,11 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+## 按用户权限与记忆
+
+- **按用户权限**：`permissions.userAccess`（open_id → read-only/workspace/full）显式覆盖；owner 默认拿 `maxAccess`；admin 成员可用 `permissions.adminAccess` 提档（默认等同 `defaultAccess`，即 admin 身份本身不改变 agent 权限）。全部仍被 `maxAccess` 封顶。管理员可在飞书用 `/grant <open_id|me> <read-only|workspace|full|reset>` 调整，`/status` 显示自己当前档位与来源。
+- **每用户记忆**：`memory.enabled: true` 后，每个用户在 `<profileDir>/memory/<open_id>.md` 有独立记忆文件，注入为 `<user_memory>` 块；有写权限的用户 agent 可直接编辑自己的记忆文件，只读用户用 `/memory`（预览/add/clear）维护。
+- **群聊会话隔离**：`sessionScope: "chat+user"` 时群聊会话按 chat+用户 隔离（默认 `chat` 全群共享）；私聊不受影响。
 ## 首次启动
 
 ```bash
