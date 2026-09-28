@@ -2118,6 +2118,7 @@ async function loadUserMemory(
     return {
       content,
       ...(writable ? { memoryFilePath: store.pathFor(senderId) } : {}),
+      ...(content ? {} : { onboarding: true }),
     };
   } catch (err) {
     log.warn('prompt', 'memory-load-failed', { message: (err as Error).message });

@@ -108,6 +108,18 @@ describe('buildAgentPrompt userMemory', () => {
     expect(p).not.toContain('<user_memory>');
   });
 
+  it('renders onboarding guidance when memory is empty and flag set', () => {
+    const p = buildAgentPrompt({ ...base, userMemory: { content: '', onboarding: true } });
+    expect(p).toContain('onboarding_mode');
+    expect(p).toContain('初始化引导');
+    expect(p).toContain('怎么称呼你');
+  });
+
+  it('no onboarding once memory has content', () => {
+    const p = buildAgentPrompt({ ...base, userMemory: { content: '已有记忆', onboarding: true } });
+    expect(p).not.toContain('onboarding_mode');
+  });
+
   it('renders the protocol note even with empty memory content', () => {
     const p = buildAgentPrompt({ ...base, userMemory: { content: '' } });
     expect(p).toContain('<user_memory>');
