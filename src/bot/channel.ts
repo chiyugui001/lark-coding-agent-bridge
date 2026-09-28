@@ -1063,7 +1063,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   });
   const cotMessages =
     configuredCotMessages !== 'off' && senderAccess.mode === 'read-only'
-      ? ('minimal' as const)
+      ? ('concise' as const)
       : configuredCotMessages;
   const cotEnabled = cotMessages !== 'off';
 

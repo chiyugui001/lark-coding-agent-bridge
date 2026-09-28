@@ -3,6 +3,45 @@ import { consumeCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnsw
 import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
+describe('COT concise mode', () => {
+  it('condenses each reasoning burst to its last sentence, shows tool summaries, hides working text', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({
+      client,
+      chatId: 'oc_chat',
+      originMessageId: 'om_o',
+      runId: 'run-c',
+      scope: 'oc_chat',
+      inputPreview: 'p',
+    });
+    await publisher.start();
+    await consumeCotEvents(iterate([
+      { type: 'thinking', delta: '首先看工程结构。然后搜索关键词。最后确认根目录下只有 README.md 和 APP_UC701。' },
+      { type: 'tool_use', id: 't1', name: 'Grep', input: { pattern: 'TS30' } },
+      { type: 'tool_result', id: 't1', output: 'no matches', isError: false },
+      { type: 'thinking', delta: '搜索没有结果。换个思路，检查 documents 目录。' },
+      { type: 'text', delta: '中间工作文本不应显示。' },
+      { type: 'final_text', content: '最终答案' },
+      { type: 'done', terminationReason: 'normal' },
+    ]), publisher, { detail: 'concise' });
+
+    const reasoning = client.events
+      .filter((e) => e.event_type === 'REASONING_MESSAGE_CONTENT')
+      .map((e) => JSON.parse(e.content).delta);
+    expect(reasoning).toEqual([
+      '最后确认根目录下只有 README.md 和 APP_UC701。',
+      '换个思路，检查 documents 目录。',
+    ]);
+    const all = client.events.map((e) => e.content).join(' ');
+    expect(all).not.toContain('首先看工程结构');
+    expect(all).not.toContain('中间工作文本');
+    expect(all).not.toContain('no matches');
+    const toolStart = client.events.find((e) => e.event_type === 'TOOL_CALL_START');
+    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ toolCallName: 'Grep' });
+    expect(client.events.some((e) => e.event_type === 'TOOL_CALL_ARGS')).toBe(false);
+  });
+});
+
 describe('COT minimal mode (read-only users)', () => {
   it('shows phase steps only — no reasoning text, working text, or tool details', async () => {
     const client = new FakeCotClient();

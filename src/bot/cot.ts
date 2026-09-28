@@ -260,6 +260,20 @@ export function finalAnswerOnlyState(state: RunState): RunState {
   };
 }
 
+/**
+ * Condense a reasoning burst to its final sentence (the conclusion),
+ * capped for the process bubble.
+ */
+function conciseSummary(text: string, max = 120): string {
+  const nl = String.fromCharCode(10);
+  const sentences = text
+    .split(new RegExp('(?<=[。！？!?])|' + nl))
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const last = sentences[sentences.length - 1] ?? text.trim();
+  return last.length > max ? last.slice(0, max) + '…' : last;
+}
+
 export async function consumeCotEvents(
   events: AsyncIterable<AgentEvent>,
   publisher: CotPublisher,
@@ -274,8 +288,29 @@ export async function consumeCotEvents(
   const reasoningMessageId = `reasoning-${publisher.runId}`;
   const finalStepId = `step-process-${publisher.runId}`;
   const minimal = opts.detail === 'minimal';
+  // concise: FastGPT-style progress — tool summaries visible, thinking
+  // condensed to the last sentence of each burst, working text suppressed.
+  const concise = opts.detail === 'concise';
+  let conciseBuffer = '';
+  let conciseBurstIndex = 0;
   let minimalThinkingStepOpen = false;
   const thinkingStepId = `step-think-${publisher.runId}`;
+
+  /** Publish the buffered reasoning burst condensed to its final sentence. */
+  const flushConciseBurst = (): void => {
+    if (!concise || !conciseBuffer.trim()) {
+      conciseBuffer = '';
+      return;
+    }
+    const summary = conciseSummary(conciseBuffer);
+    conciseBuffer = '';
+    if (!summary) return;
+    const messageId = `reasoning-${publisher.runId}-${++conciseBurstIndex}`;
+    publisher.enqueue('REASONING_START', { messageId });
+    publisher.enqueue('REASONING_MESSAGE_START', { messageId, role: 'reasoning' });
+    publisher.enqueue('REASONING_MESSAGE_CONTENT', { messageId, delta: summary });
+    publisher.enqueue('REASONING_MESSAGE_END', { messageId });
+  };
 
   try {
     for await (const evt of events) {
@@ -288,6 +323,12 @@ export async function consumeCotEvents(
             minimalThinkingStepOpen = true;
             publisher.enqueue('STEP_STARTED', { stepId: thinkingStepId, stepName: '思考中' });
           }
+          continue;
+        }
+        if (concise) {
+          // Buffer the burst; only its final sentence is published (below,
+          // when the burst closes at a tool call / text / terminal event).
+          conciseBuffer += evt.delta;
           continue;
         }
         if (!reasoningOpen) {
@@ -307,13 +348,14 @@ export async function consumeCotEvents(
       if (evt.type === 'tool_use') {
         closeReasoningIfNeeded();
         closeTextIfNeeded();
+        flushConciseBurst();
         if (minimal && minimalThinkingStepOpen) {
           minimalThinkingStepOpen = false;
           publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
         }
         const toolCallId = evt.id;
         const detailed = opts.detail === 'detailed';
-        const showSummary = opts.detail === 'brief' || detailed;
+        const showSummary = opts.detail === 'brief' || detailed || concise;
         // minimal: WHICH tool is visible; HOW it is called (args and
         // input-derived titles) is not.
         const title = showSummary
@@ -359,7 +401,8 @@ export async function consumeCotEvents(
       }
       if (evt.type === 'text') {
         closeReasoningIfNeeded();
-        if (minimal) {
+        flushConciseBurst();
+        if (minimal || concise) {
           // Working text stays private; the final reply carries the answer.
           if (minimalThinkingStepOpen) {
             minimalThinkingStepOpen = false;
@@ -396,6 +439,7 @@ export async function consumeCotEvents(
       if (evt.type === 'done' || evt.type === 'error') {
         closeReasoningIfNeeded();
         closeTextIfNeeded();
+        flushConciseBurst();
         if (minimalThinkingStepOpen) {
           minimalThinkingStepOpen = false;
           publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
