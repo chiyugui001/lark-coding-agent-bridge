@@ -618,6 +618,10 @@ function buildZcodePrompt(
         '',
         '判断拿不准时按 2 处理（宁可多答查询），但绝不先尝试执行再道歉。',
         '',
+        '例外——保存记忆不是写操作：用户要求记住/保存某些信息到记忆时，',
+        '按 user_memory 块中的 memory_write 协议在回复末尾输出标记块',
+        '（bridge 代写文件），第一句直接确认已记住即可，不要拒绝、不要要求提权。',
+        '',
       ].join('\n')
     : '';
   return `${prompt}\n\n## bridge_system_prompt\n\n${buildBridgeSystemPrompt(identity)}${planHint}`;
