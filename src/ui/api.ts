@@ -275,6 +275,18 @@ function parseProfileExtras(
           desktopSync: typeof zcRaw.desktopSync === 'boolean' ? zcRaw.desktopSync : (current.zcode?.desktopSync !== false),
         }
       : null;
+  const order = { 'read-only': 0, workspace: 1, full: 2 } as const;
+  if (order[defaultAccess] > order[maxAccess]) {
+    throw new ApiError(400, '默认权限不能超过权限上限');
+  }
+  if (adminAccess && order[adminAccess] > order[maxAccess]) {
+    throw new ApiError(400, '管理员权限不能超过权限上限（请先提高权限上限）');
+  }
+  for (const [id, mode] of Object.entries(userAccess)) {
+    if (order[mode] > order[maxAccess]) {
+      throw new ApiError(400, `用户 ${id.slice(-8)} 的档位不能超过权限上限（请先提高权限上限）`);
+    }
+  }
   return { permissions: { defaultAccess, maxAccess, adminAccess, userAccess }, memory, sessionScope, zcode };
 }
 

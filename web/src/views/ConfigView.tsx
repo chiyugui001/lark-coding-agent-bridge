@@ -68,7 +68,24 @@ export function ConfigView({ profile }: { profile: string }) {
   if (!cfg) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
   const set = <K extends keyof ConfigData>(k: K, v: ConfigData[K]) =>
-    setCfg({ ...cfg, [k]: v });
+    setCfg({ ...cfg, [k]: v });
+  // Raise/lower the ceiling: dependent levels (adminAccess, userAccess) are
+  // clamped so the saved combination never exceeds maxAccess.
+  const setMaxAccess = (next: ConfigData["permissions"]["maxAccess"]) => {
+    if (!cfg) return;
+    const order = MODE_ORDER;
+    set("permissions", {
+      ...cfg.permissions,
+      maxAccess: next,
+      adminAccess:
+        cfg.permissions.adminAccess && order[cfg.permissions.adminAccess] > order[next]
+          ? null
+          : cfg.permissions.adminAccess,
+      userAccess: Object.fromEntries(
+        Object.entries(cfg.permissions.userAccess).filter(([, m]) => order[m] <= order[next]),
+      ),
+    });
+  };
   const team = cfg.mode === "team";
 
   async function save() {
@@ -204,12 +221,12 @@ export function ConfigView({ profile }: { profile: string }) {
               options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
           </Field>
           <Field label="权限上限" hint="任何用户（含 owner/管理员/覆盖表）不能超过此档">
-            <SelectRow value={cfg.permissions.maxAccess} onChange={(v) => set("permissions", { ...cfg.permissions, maxAccess: v as ConfigData["permissions"]["maxAccess"] })}
+            <SelectRow value={cfg.permissions.maxAccess} onChange={(v) => setMaxAccess(v as ConfigData["permissions"]["maxAccess"] })}
               options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
           </Field>
           <Field label="管理员权限" hint="access.admins 成员的档位；默认跟随「默认权限」">
             <SelectRow value={cfg.permissions.adminAccess ?? "default"} onChange={(v) => set("permissions", { ...cfg.permissions, adminAccess: v === "default" ? null : v as ConfigData["permissions"]["adminAccess"] })}
-              options={[["default", "跟随默认权限"], ["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
+              options={ADMIN_ACCESS_OPTIONS.filter(([m]) => m === "default" || MODE_ORDER[m] <= MODE_ORDER[cfg.permissions.maxAccess])} />
           </Field>
           <UserAccessEditor
             userAccess={cfg.permissions.userAccess}
@@ -986,6 +1003,14 @@ function AccessList({ label, placeholder, ids, onAdd, onRemove }: {
     </div>
   );
 }
+
+const MODE_ORDER: Record<string, number> = { "read-only": 0, workspace: 1, full: 2 };
+const ADMIN_ACCESS_OPTIONS: [string, string][] = [
+  ["default", "跟随默认权限"],
+  ["read-only", "只读"],
+  ["workspace", "工作区可写"],
+  ["full", "完全"],
+];
 
 function UserAccessEditor({ userAccess, maxAccess, onChange }: {
   userAccess: Record<string, ConfigData["permissions"]["userAccess"][string]>;
