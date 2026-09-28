@@ -68,7 +68,7 @@ export function ConfigView({ profile }: { profile: string }) {
   if (!cfg) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
   const set = <K extends keyof ConfigData>(k: K, v: ConfigData[K]) =>
-    setCfg({ ...cfg, [k]: v });
+    setCfg({ ...cfg, [k]: v });
   // Raise/lower the ceiling: dependent levels (adminAccess, userAccess) are
   // clamped so the saved combination never exceeds maxAccess.
   const setMaxAccess = (next: ConfigData["permissions"]["maxAccess"]) => {
@@ -221,7 +221,7 @@ export function ConfigView({ profile }: { profile: string }) {
               options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
           </Field>
           <Field label="权限上限" hint="任何用户（含 owner/管理员/覆盖表）不能超过此档">
-            <SelectRow value={cfg.permissions.maxAccess} onChange={(v) => setMaxAccess(v as ConfigData["permissions"]["maxAccess"] })}
+            <SelectRow value={cfg.permissions.maxAccess} onChange={(v) => setMaxAccess(v as ConfigData["permissions"]["maxAccess"])}
               options={[["read-only", "只读"], ["workspace", "工作区可写"], ["full", "完全"]] } />
           </Field>
           <Field label="管理员权限" hint="access.admins 成员的档位；默认跟随「默认权限」">
