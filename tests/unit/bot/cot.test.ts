@@ -55,8 +55,11 @@ describe('COT concise mode', () => {
     expect(all).not.toContain('中间工作文本');
     expect(all).not.toContain('no matches');
     const toolStart = client.events.find((e) => e.event_type === 'TOOL_CALL_START');
-    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ toolCallName: 'Grep' });
+    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ title: '调用工具: Grep', toolCallName: 'Grep' });
     expect(client.events.some((e) => e.event_type === 'TOOL_CALL_ARGS')).toBe(false);
+    // absolute paths must not leak into concise tool titles
+    const readStart = client.events.filter((e) => e.event_type === 'TOOL_CALL_START').map((e) => JSON.parse(e.content).title);
+    expect(readStart.every((t: string) => !t.includes('D:') && !t.includes('/'))).toBe(true);
   });
 });
 

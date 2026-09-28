@@ -334,12 +334,14 @@ export async function consumeCotEvents(
       if (evt.type === 'system' || evt.type === 'usage') continue;
       if (evt.type === 'thinking') {
         closeTextIfNeeded();
-        if (minimal) {
-          // Phase bullets only — reasoning content stays private.
+        if (minimal || concise) {
           if (!minimalThinkingStepOpen) {
             minimalThinkingStepOpen = true;
             publisher.enqueue('STEP_STARTED', { stepId: thinkingStepId, stepName: '思考中' });
           }
+        }
+        if (minimal) {
+          // Phase bullets only — reasoning content stays private.
           continue;
         }
         if (concise) {
@@ -366,26 +368,26 @@ export async function consumeCotEvents(
         closeReasoningIfNeeded();
         closeTextIfNeeded();
         flushConciseBurst();
-        if (minimal && minimalThinkingStepOpen) {
+        if ((minimal || concise) && minimalThinkingStepOpen) {
           minimalThinkingStepOpen = false;
           publisher.enqueue('STEP_FINISHED', { stepId: thinkingStepId, stepName: '思考中' });
         }
         const toolCallId = evt.id;
         const detailed = opts.detail === 'detailed';
-        const showSummary = opts.detail === 'brief' || detailed || concise;
-        // minimal: WHICH tool is visible; HOW it is called (args and
-        // input-derived titles) is not.
+        // brief/detailed: input-derived summary titles. minimal/concise:
+        // tool NAME only — no file paths, no command text.
+        const showSummary = opts.detail === 'brief' || detailed;
         const title = showSummary
           ? cotBriefToolTitle(evt.name, evt.input, 'running')
-          : minimal
+          : minimal || concise
             ? `调用工具: ${evt.name}`
             : '正在调用工具';
         toolBrief.set(toolCallId, { name: evt.name, input: evt.input });
         publisher.enqueue('TOOL_CALL_START', {
           toolCallId,
-          icon: showSummary || minimal ? cotToolIcon(evt.name) : 'default',
+          icon: showSummary || minimal || concise ? cotToolIcon(evt.name) : 'default',
           title,
-          toolCallName: showSummary || minimal ? evt.name : 'tool',
+          toolCallName: showSummary || minimal || concise ? evt.name : 'tool',
         });
         if (detailed && evt.input !== undefined) {
           publisher.enqueue('TOOL_CALL_ARGS', {
@@ -405,7 +407,7 @@ export async function consumeCotEvents(
           role: 'tool',
           content: detailed
             ? truncateCot(evt.output ?? '', COT_TOOL_OUTPUT_MAX)
-            : minimal
+            : minimal || concise
               ? evt.isError
                 ? '工具调用失败'
                 : '工具调用已完成'
