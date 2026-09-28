@@ -58,6 +58,7 @@ export interface ConfigView {
   };
   memory: { enabled: boolean };
   sessionScope: "chat" | "chat+user";
+  workspace: string;
   zcode: { transport: "app-server" | "cli"; desktopSync: boolean } | null;
   access: {
     allowedUsers: string[];
