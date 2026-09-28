@@ -156,7 +156,7 @@ export function ConfigView({ profile }: { profile: string }) {
           </Field>
           <ToggleRow label="工具调用显示" hint="显示 bot 执行的命令与文件读写过程" checked={cfg.showToolCalls}
             onChange={(v) => set("showToolCalls", v)} />
-          <Field label="COT 过程消息">
+          <Field label="COT 过程消息" hint="只读用户运行时强制使用「精简」档，与这里的配置无关">
             <SelectRow value={cfg.cotMessages} onChange={(v) => set("cotMessages", v as ConfigData["cotMessages"])}
               options={[["off", "关闭"], ["minimal", "阶段条"], ["concise", "精简（只读默认）"], ["brief", "简略"], ["detailed", "详细"]]} />
           </Field>
