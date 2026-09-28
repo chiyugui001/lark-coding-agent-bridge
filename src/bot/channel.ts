@@ -968,6 +968,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...(threadId ? { threadId } : {}),
   };
   const capability = agentCapability(controls.profileConfig);
+  const runStartedAt = Date.now();
   const flow = await startRunFlow({
     scopeId: scope,
     sessionScopeId,
@@ -1133,6 +1134,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           });
         }
         await sendFinalReply({
+    elapsedMs: Date.now() - runStartedAt,
           channel,
           chatId,
           scope,
@@ -1207,6 +1209,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
       if (controls.profileConfig.agentKind === 'codex') {
         await sendFinalReply({
+    elapsedMs: Date.now() - runStartedAt,
           channel,
           chatId,
           scope,
@@ -1270,6 +1273,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       await recallIfEmptyStreamedReply(channel, progress, filterForPrefs(latestState), scope);
       if (controls.profileConfig.agentKind === 'codex') {
         await sendFinalReply({
+    elapsedMs: Date.now() - runStartedAt,
           channel,
           chatId,
           scope,
@@ -1292,6 +1296,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         async () => {},
       );
       await sendFinalReply({
+    elapsedMs: Date.now() - runStartedAt,
         channel,
         chatId,
         scope,
@@ -1463,6 +1468,22 @@ async function recallStreamedMessage(
   }
 }
 
+/** Prepend the elapsed-time line to the reply text (first line, all modes). */
+function withDurationLine(state: RunState, elapsedMs: number | undefined): RunState {
+  if (elapsedMs === undefined) return state;
+  const line = `⏱ 耗时 ${(elapsedMs / 1000).toFixed(1)}s`;
+  const first = state.blocks[0];
+  const blocks =
+    first && first.kind === 'text'
+      ? [{ ...first, content: `${line}\n\n${first.content}` }, ...state.blocks.slice(1)]
+      : [{ kind: 'text' as const, content: line, streaming: false }, ...state.blocks];
+  return {
+    ...state,
+    blocks,
+    ...(state.finalText ? { finalText: `${line}\n\n${state.finalText}` } : {}),
+  };
+}
+
 async function sendFinalReply(input: {
   channel: LarkChannel;
   chatId: string;
@@ -1471,8 +1492,11 @@ async function sendFinalReply(input: {
   replyMode: ReturnType<typeof getMessageReplyMode>;
   sendOpts: { replyTo: string; replyInThread?: boolean };
   cardRenderOptions: { signCallback?: (action: string) => string };
+  /** Wall-clock run duration; rendered as the first line of the reply. */
+  elapsedMs?: number;
 }): Promise<void> {
-  const body = renderText(input.state);
+  const state = withDurationLine(input.state, input.elapsedMs);
+  const body = renderText(state);
 
   // Nothing deliverable to send (agent produced no text on a clean finish;
   // error/interrupt/timeout keep `body` non-empty via their notices). Skip
@@ -1485,7 +1509,7 @@ async function sendFinalReply(input: {
   if (input.replyMode === 'card') {
     const result = await input.channel.send(
       input.chatId,
-      { card: renderCard(input.state, input.cardRenderOptions) },
+      { card: renderCard(state, input.cardRenderOptions) },
       input.sendOpts,
     );
     requireMessageReceipt(result, 'card');
