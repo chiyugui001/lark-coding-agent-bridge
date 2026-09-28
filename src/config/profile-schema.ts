@@ -179,6 +179,13 @@ export interface ProfileConfig {
   zcode?: ZcodeConfig;
   memory: MemoryConfig;
   /**
+   * Bridge-level filesystem whitelist (agent-agnostic): file access is
+   * confined to the allowed dirs via a path-validating MCP server, and the
+   * agent's native file/shell tools are denied. Applied per CLI through its
+   * own mechanism (zcode engine config / claude run flags / codex later).
+   */
+  fsWhitelist?: { enabled: boolean; dirs?: string[] };
+  /**
    * Session continuity scope for group chats. `chat` (default) keeps one
    * agent session per chat; `chat+user` keys sessions by chat AND sender,
    * so each member carries their own conversation context. Private chats
@@ -267,6 +274,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     codex?: CodexConfig & { flags?: unknown };
     zcode?: ZcodeConfig;
     memory?: Partial<MemoryConfig>;
+    fsWhitelist?: { enabled?: boolean; dirs?: unknown };
     sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
@@ -314,6 +322,16 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     permissionSource,
     ...(raw.codex ? { codex: normalizeCodex(raw.codex) } : {}),
     ...(raw.zcode ? { zcode: normalizeZcode(raw.zcode) } : {}),
+    ...(raw.fsWhitelist && typeof raw.fsWhitelist === 'object'
+      ? {
+          fsWhitelist: {
+            enabled: raw.fsWhitelist.enabled === true,
+            ...(Array.isArray(raw.fsWhitelist.dirs)
+              ? { dirs: raw.fsWhitelist.dirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '') }
+              : {}),
+          },
+        }
+      : {}),
     memory: {
       enabled: raw.memory?.enabled === true,
       ...(typeof raw.memory?.injectMaxBytes === 'number' && raw.memory.injectMaxBytes > 0

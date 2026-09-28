@@ -19,6 +19,7 @@ import type { ClaudePermissionMode } from '../types';
 import { translateEvent } from './stream-json';
 import { ZcodeAppServerClient, type AppServerSessionEvent } from './app-server';
 import { upsertDesktopTask } from './desktop-sync';
+import { syncZcodeFsWhitelist, type FsWhitelistConfig } from './fs-sandbox';
 
 export type ZcodeTransport = 'app-server' | 'cli';
 
@@ -33,6 +34,10 @@ export interface ZcodeAdapterOptions {
   transport?: ZcodeTransport;
   /** Mirror bridge sessions into the ZCode desktop app's task list. Default true. */
   desktopSync?: boolean;
+  /** Bridge-level strict-fs whitelist (path-validated MCP; native tools denied). */
+  fsWhitelist?: FsWhitelistConfig;
+  /** Default dir for the whitelist when fsWhitelist.dirs is unset. */
+  defaultWorkspaceDir?: string;
   larkChannel?: LarkChannelEnvContext;
 }
 
@@ -75,11 +80,15 @@ export class ZcodeAdapter implements AgentAdapter {
   private readonly larkChannel: LarkChannelEnvContext | undefined;
   private botIdentity: AgentBotIdentity | undefined;
   private client: ZcodeAppServerClient | undefined;
+  private readonly fsWhitelist: FsWhitelistConfig | undefined;
+  private readonly defaultWorkspaceDir: string | undefined;
 
   constructor(opts: ZcodeAdapterOptions = {}) {
     this.binary = opts.binary ?? defaultCjsPath() ?? 'zcode';
     this.transport = opts.transport ?? 'app-server';
     this.desktopSync = opts.desktopSync !== false;
+    this.fsWhitelist = opts.fsWhitelist;
+    this.defaultWorkspaceDir = opts.defaultWorkspaceDir;
     this.larkChannel = opts.larkChannel;
   }
 
@@ -110,6 +119,11 @@ export class ZcodeAdapter implements AgentAdapter {
   }
 
   private runViaAppServer(opts: AgentRunOptions): AgentRun {
+    // Strict-fs whitelist: engine config changes need a fresh app-server.
+    if (syncZcodeFsWhitelist(this.fsWhitelist, this.defaultWorkspaceDir ?? opts.cwd ?? '')) {
+      void this.client?.dispose().catch(() => undefined);
+      this.client = undefined;
+    }
     const { command, preArgs } = resolveInvocation(this.binary);
     this.client ??= new ZcodeAppServerClient({
       command,

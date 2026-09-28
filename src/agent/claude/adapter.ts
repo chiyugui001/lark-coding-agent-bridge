@@ -20,6 +20,11 @@ import { translateEvent } from './stream-json';
 
 export interface ClaudeAdapterOptions {
   binary?: string;
+  /** Bridge-level strict-fs whitelist: mount the path-validating MCP
+   * filesystem server scoped to the dirs and deny native file/shell tools
+   * via per-run flags, so all file access is path-checked. */
+  fsWhitelist?: { enabled: boolean; dirs?: string[] };
+  defaultWorkspaceDir?: string;
   larkChannel?: LarkChannelEnvContext;
 }
 
@@ -31,11 +36,15 @@ export class ClaudeAdapter implements AgentAdapter {
 
   private readonly binary: string;
   private readonly larkChannel: LarkChannelEnvContext | undefined;
+  private readonly fsWhitelist: ClaudeAdapterOptions['fsWhitelist'];
+  private readonly defaultWorkspaceDir: string | undefined;
   private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.binary = opts.binary ?? 'claude';
     this.larkChannel = opts.larkChannel;
+    this.fsWhitelist = opts.fsWhitelist;
+    this.defaultWorkspaceDir = opts.defaultWorkspaceDir;
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -82,6 +91,8 @@ export class ClaudeAdapter implements AgentAdapter {
     ];
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
+    const wlArgs = claudeFsWhitelistArgs(this.fsWhitelist, this.defaultWorkspaceDir ?? opts.cwd);
+    if (wlArgs) args.push(...wlArgs);
 
     const child = spawnProcess(this.binary, args, {
       cwd: opts.cwd,
@@ -296,4 +307,31 @@ function isWindowsCommandNotFoundLine(line: string): boolean {
     process.platform === 'win32' &&
     /is not recognized as an internal or external command|operable program or batch file/i.test(line)
   );
+}
+
+/**
+ * Per-run whitelist flags: an MCP config file mounting the official
+ * filesystem server on the allowed dirs, plus denial of native file/shell
+ * tools so nothing bypasses the whitelist.
+ */
+function claudeFsWhitelistArgs(
+  wl: ClaudeAdapterOptions['fsWhitelist'],
+  defaultDir: string | undefined,
+): string[] | undefined {
+  if (!wl?.enabled) return undefined;
+  const dirs = (wl.dirs?.length ? wl.dirs : defaultDir ? [defaultDir] : []).map((d) => d.trim()).filter(Boolean);
+  if (dirs.length === 0) return undefined;
+  const mcpConfig = {
+    mcpServers: {
+      'lark-fs': {
+        type: 'stdio',
+        command: 'cmd',
+        args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', ...dirs],
+      },
+    },
+  };
+  const dir = mkdtempSync(join(tmpdir(), 'lark-fswl-'));
+  const path = join(dir, 'mcp.json');
+  writeFileSync(path, JSON.stringify(mcpConfig), 'utf8');
+  return ['--mcp-config', path, '--disallowedTools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'];
 }

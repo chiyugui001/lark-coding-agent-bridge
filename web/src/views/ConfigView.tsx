@@ -117,6 +117,7 @@ export function ConfigView({ profile }: { profile: string }) {
         sessionScope: cfg.sessionScope,
         ...(cfg.zcode ? { zcode: cfg.zcode } : {}),
         workspace: cfg.workspace,
+        fsWhitelist: cfg.fsWhitelist,
       });
       setCfg(next);
       toast.success(next.live ? "已保存，立即生效" : "已保存，下次启动该 profile 生效");
@@ -245,7 +246,17 @@ export function ConfigView({ profile }: { profile: string }) {
           <Separator />
           <ToggleRow label="每用户记忆" hint="每个用户独立的跨会话记忆文件，注入为 <user_memory> 块" checked={cfg.memory.enabled}
             onChange={(v) => set("memory", { enabled: v })} />
-                    <Field label="默认工作目录" hint="新会话的工作目录（agent 在此目录下运行）。留空使用桥接托管目录；聊天内可用 /cd 临时切换">
+                              <ToggleRow label="目录白名单（严格模式）" hint="开启后所有文件访问经 MCP filesystem 服务器按白名单校验（含软链接防逃逸），并禁用 agent 原生文件/命令工具——Bash/git/编译也不可用，agent 变成白名单内的纯文件操作。对所有 agent 类型生效。"
+            checked={cfg.fsWhitelist.enabled}
+            onChange={(v) => set("fsWhitelist", { ...cfg.fsWhitelist, enabled: v })} />
+          {cfg.fsWhitelist.enabled && (
+            <Field label="允许的目录（每行一个）" hint="留空使用默认工作目录；修改后下一轮对话生效（会重启 agent 引擎进程）">
+              <textarea className="min-h-[72px] w-full rounded-md border bg-transparent p-2 font-mono text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+                value={cfg.fsWhitelist.dirs.join("\n")}
+                onChange={(e) => set("fsWhitelist", { ...cfg.fsWhitelist, dirs: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })} />
+            </Field>
+          )}
+          <Field label="默认工作目录" hint="新会话的工作目录（agent 在此目录下运行）。留空使用桥接托管目录；聊天内可用 /cd 临时切换">
             <Input className="h-9" value={cfg.workspace} placeholder="D:\git\iot\sensor"
               onChange={(e) => set("workspace", e.target.value)} />
           </Field>

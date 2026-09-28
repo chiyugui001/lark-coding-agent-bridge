@@ -55,10 +55,18 @@ export function createRuntimeAgent(
       ...(profileConfig.zcode?.binaryPath ? { binary: profileConfig.zcode.binaryPath } : {}),
       ...(profileConfig.zcode?.transport ? { transport: profileConfig.zcode.transport } : {}),
       ...(profileConfig.zcode?.desktopSync === false ? { desktopSync: false } : {}),
+      ...(profileConfig.fsWhitelist
+        ? { fsWhitelist: profileConfig.fsWhitelist, defaultWorkspaceDir: profileConfig.workspaces.default }
+        : {}),
       larkChannel,
     });
   }
-  return new ClaudeAdapter({ larkChannel });
+  return new ClaudeAdapter({
+    larkChannel,
+    ...(profileConfig.fsWhitelist
+      ? { fsWhitelist: profileConfig.fsWhitelist, defaultWorkspaceDir: profileConfig.workspaces.default }
+      : {}),
+  });
 }
 
 export async function checkRuntimeAgentAvailability(agent: AgentAdapter): Promise<AgentAvailability> {
