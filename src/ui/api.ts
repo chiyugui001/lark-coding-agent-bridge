@@ -16,6 +16,9 @@ import { checkMeetingPreflight, type MeetingPreflight } from '../meeting/preflig
 import { describeMeetingError, type MeetingManager, type MeetingPushHealth } from '../meeting/manager';
 import type { MeetingSessionStatus } from '../meeting/session';
 import { resolveAppPaths } from '../config/app-paths';
+import { MemoryStore } from '../bot/memory-store';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { loadRootConfig, runtimeProfileConfig } from '../config/profile-store';
 import type { ProfileConfig } from '../config/profile-schema';
 import {
@@ -472,6 +475,42 @@ const ACCESS_LIST: Record<AccessKind, 'allowedUsers' | 'admins' | 'allowedChats'
  *  - `set-mention`: set (or clear) a chat's per-chat @-mention override. Pass
  *    `requireMention: true|false` to override, or `null` to follow the global.
  */
+/** Per-user memory files: list / read / write / clear for the console. */
+export async function listMemories(state: MutableProfileState): Promise<{
+  memories: { userId: string; bytes: number; modifiedAt: number; preview: string }[];
+}> {
+  const appPaths = resolveAppPaths({ rootDir: dirname(state.configPath), profile: state.profile });
+  const store = new MemoryStore(join(appPaths.profileDir, 'memory'));
+  return { memories: await store.list() };
+}
+
+export async function memoryAction(
+  state: MutableProfileState,
+  body: unknown,
+): Promise<{ content?: string }> {
+  const fv = asRecord(body);
+  const userId = typeof fv.userId === 'string' ? fv.userId.trim() : '';
+  if (!userId || !/^[A-Za-z0-9_-]+$/.test(userId)) throw new ApiError(400, 'invalid userId');
+  const appPaths = resolveAppPaths({ rootDir: dirname(state.configPath), profile: state.profile });
+  const store = new MemoryStore(join(appPaths.profileDir, 'memory'));
+  const action = fv.action;
+  if (action === 'get') {
+    return { content: await store.get(userId) };
+  }
+  if (action === 'clear') {
+    await store.clear(userId);
+    return { content: '' };
+  }
+  if (action === 'set') {
+    const content = typeof fv.content === 'string' ? fv.content : '';
+    const path = store.pathFor(userId);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, 'utf8');
+    return { content };
+  }
+  throw new ApiError(400, 'action must be get | set | clear');
+}
+
 export async function mutateAccess(
   state: MutableProfileState,
   body: unknown,

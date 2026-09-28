@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { stat as statFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -58,6 +59,35 @@ export class MemoryStore {
   async clear(senderId: string): Promise<void> {
     await this.ensureDir();
     await writeFile(this.pathFor(senderId), '', 'utf8');
+  }
+
+  /** All stored memories: sanitized user id, size, mtime, and a short preview. */
+  async list(): Promise<{ userId: string; bytes: number; modifiedAt: number; preview: string }[]> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.baseDir);
+    } catch {
+      return [];
+    }
+    const out: { userId: string; bytes: number; modifiedAt: number; preview: string }[] = [];
+    for (const name of entries) {
+      if (!name.endsWith('.md')) continue;
+      const userId = name.slice(0, -3);
+      const path = join(this.baseDir, name);
+      try {
+        const [stat, content] = await Promise.all([statFile(path), readFile(path, 'utf8')]);
+        out.push({
+          userId,
+          bytes: stat.size,
+          modifiedAt: stat.mtimeMs,
+          preview: content.trim().slice(0, 120),
+        });
+      } catch {
+        // unreadable entry — skip
+      }
+    }
+    out.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    return out;
   }
 
   private async ensureDir(): Promise<void> {

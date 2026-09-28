@@ -51,6 +51,13 @@ export function ConfigView({ profile }: { profile: string }) {
       })
       .catch((e) => setError(String(e.message ?? e)));
 
+  // per-user memory files (loaded on demand for the memory card)
+  const [memories, setMemories] = useState<{ userId: string; bytes: number; modifiedAt: number; preview: string }[]>([]);
+  const loadMemories = () =>
+    apiGet<{ memories: typeof memories }>(`/api/memory?profile=${encodeURIComponent(profile)}`)
+      .then((r) => setMemories(r.memories))
+      .catch(() => {});
+
   const loadChatNames = () =>
     apiGet<{ chats: { id: string; name: string }[] }>(`/api/chats?profile=${encodeURIComponent(profile)}`)
       .then((r) => setChatNames((m) => ({ ...m, ...Object.fromEntries(r.chats.map((c) => [c.id, c.name])) })))
@@ -59,8 +66,10 @@ export function ConfigView({ profile }: { profile: string }) {
   useEffect(() => {
     setCfg(null);
     setChatNames({});
+    setMemories([]);
     load();
     void loadChatNames();
+    void loadMemories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
@@ -280,6 +289,8 @@ export function ConfigView({ profile }: { profile: string }) {
             onAdd={(id) => access("add", "admin", id)} onRemove={(id) => access("remove", "admin", id)} />
         </CardContent>
       </Card>
+
+      <UserMemoryCard profile={profile} memories={memories} enabled={cfg.memory.enabled} onReload={loadMemories} />
 
       <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background/90 py-3 backdrop-blur">
         <Button variant="outline" onClick={() => load()} disabled={saving}>重新加载</Button>
@@ -1066,5 +1077,96 @@ function UserAccessEditor({ userAccess, maxAccess, onChange }: {
         <Button variant="outline" size="sm" onClick={add}>添加</Button>
       </div>
     </div>
+  );
+}
+/** Per-user memory viewer/editor backed by /api/memory. */
+function UserMemoryCard({ profile, memories, enabled, onReload }: {
+  profile: string;
+  memories: { userId: string; bytes: number; modifiedAt: number; preview: string }[];
+  enabled: boolean;
+  onReload: () => void;
+}) {
+  const [editing, setEditing] = useState<{ userId: string; content: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const open = async (userId: string) => {
+    try {
+      const r = await apiPost<{ content: string }>(`/api/memory?profile=${encodeURIComponent(profile)}`, { action: "get", userId });
+      setEditing({ userId, content: r.content });
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    }
+  };
+
+  const save = async () => {
+    if (!editing) return;
+    setBusy(true);
+    try {
+      await apiPost(`/api/memory?profile=${encodeURIComponent(profile)}`, { action: "set", userId: editing.userId, content: editing.content });
+      toast.success("已保存");
+      setEditing(null);
+      onReload();
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async (userId: string) => {
+    try {
+      await apiPost(`/api/memory?profile=${encodeURIComponent(profile)}`, { action: "clear", userId });
+      toast.success("已清空");
+      onReload();
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader><CardTitle>用户记忆</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        {!enabled && (
+          <p className="text-xs text-muted-foreground">记忆功能未开启（上方「每用户记忆」开关）。</p>
+        )}
+        {enabled && memories.length === 0 && (
+          <p className="text-xs text-muted-foreground">还没有任何用户的记忆。用户在飞书用 /memory add 沉淀后会出现。</p>
+        )}
+        {enabled && memories.length > 0 && (
+          <div className="space-y-2">
+            {memories.map((m) => (
+              <div key={m.userId} className="space-y-1 rounded-md border p-3">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 truncate text-xs">{m.userId}</code>
+                  <span className="text-xs text-muted-foreground">{m.bytes} B · {new Date(m.modifiedAt).toLocaleString()}</span>
+                  <Button variant="outline" size="sm" onClick={() => open(m.userId)}>编辑</Button>
+                  <Button variant="ghost" size="sm" onClick={() => clear(m.userId)}>清空</Button>
+                </div>
+                {m.preview && <p className="line-clamp-2 text-xs text-muted-foreground">{m.preview}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>记忆：{editing?.userId}</DialogTitle>
+            <DialogDescription>直接编辑该用户的持久记忆，保存后下一轮对话注入生效。</DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="min-h-[240px] w-full rounded-md border bg-transparent p-3 font-mono text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
+            value={editing?.content ?? ""}
+            onChange={(e) => setEditing((cur) => (cur ? { ...cur, content: e.target.value } : cur))}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={busy}>取消</Button>
+            <Button onClick={save} disabled={busy}>{busy ? "保存中…" : "保存"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

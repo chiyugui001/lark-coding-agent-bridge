@@ -1,3 +1,4 @@
+import { listMemories, memoryAction } from './api';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -213,6 +214,16 @@ async function route(
     const { state, live, controls } = await resolveTargetState(deps, url);
     const body = await readJsonBody(req);
     sendJson(res, 200, live && controls ? await applyConfig(controls, body) : await applyConfigToDisk(state, body));
+    return;
+  }
+  if (path === '/api/memory' && g) {
+    const { state } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await listMemories(state));
+    return;
+  }
+  if (path === '/api/memory' && p) {
+    const { state } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await memoryAction(state, await readJsonBody(req)));
     return;
   }
   if (path === '/api/access' && p) {
