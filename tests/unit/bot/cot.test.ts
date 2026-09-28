@@ -37,7 +37,9 @@ describe('COT minimal mode (read-only users)', () => {
       .map((e) => JSON.parse(e.content).stepName);
     expect(steps).toEqual(['理解用户问题', '思考中', '整理回复']);
     const toolStart = client.events.find((e) => e.event_type === 'TOOL_CALL_START');
-    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ title: '正在调用工具' });
+    expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ title: '调用工具: Read', toolCallName: 'Read' });
+    // args/output still hidden
+    expect(client.events.map((e) => e.content).join(' ')).not.toContain('graphify-sync.sh');
   });
 });
 

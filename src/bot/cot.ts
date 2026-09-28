@@ -314,13 +314,19 @@ export async function consumeCotEvents(
         const toolCallId = evt.id;
         const detailed = opts.detail === 'detailed';
         const showSummary = opts.detail === 'brief' || detailed;
-        const title = showSummary ? cotBriefToolTitle(evt.name, evt.input, 'running') : '正在调用工具';
+        // minimal: WHICH tool is visible; HOW it is called (args and
+        // input-derived titles) is not.
+        const title = showSummary
+          ? cotBriefToolTitle(evt.name, evt.input, 'running')
+          : minimal
+            ? `调用工具: ${evt.name}`
+            : '正在调用工具';
         toolBrief.set(toolCallId, { name: evt.name, input: evt.input });
         publisher.enqueue('TOOL_CALL_START', {
           toolCallId,
-          icon: showSummary ? cotToolIcon(evt.name) : 'default',
+          icon: showSummary || minimal ? cotToolIcon(evt.name) : 'default',
           title,
-          toolCallName: showSummary ? evt.name : 'tool',
+          toolCallName: showSummary || minimal ? evt.name : 'tool',
         });
         if (detailed && evt.input !== undefined) {
           publisher.enqueue('TOOL_CALL_ARGS', {
