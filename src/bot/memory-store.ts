@@ -20,6 +20,8 @@ function sanitizeUserId(senderId: string): string {
 export class MemoryStore {
   private readonly baseDir: string;
   private readonly injectMaxBytes: number;
+  /** Serializes file writes so concurrent appends cannot clobber each other. */
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(baseDir: string, injectMaxBytes = DEFAULT_MEMORY_INJECT_MAX_BYTES) {
     this.baseDir = baseDir;
@@ -47,18 +49,29 @@ export class MemoryStore {
     return content.slice(0, this.injectMaxBytes);
   }
 
+  /** Run an async mutation on the serialized write chain. */
+  private enqueueWrite(run: () => Promise<void>): Promise<void> {
+    const result = this.writeChain.then(run, run);
+    this.writeChain = result.catch(() => undefined);
+    return result;
+  }
+
   async append(senderId: string, text: string): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) throw new Error('memory append requires non-empty text');
-    const current = await this.get(senderId);
-    const next = current ? `${current}\n${trimmed}` : trimmed;
-    await this.ensureDir();
-    await writeFile(this.pathFor(senderId), next, 'utf8');
+    await this.enqueueWrite(async () => {
+      const current = await this.get(senderId);
+      const next = current ? `${current}\n${trimmed}` : trimmed;
+      await this.ensureDir();
+      await writeFile(this.pathFor(senderId), next, 'utf8');
+    });
   }
 
-  async clear(senderId: string): Promise<void> {
-    await this.ensureDir();
-    await writeFile(this.pathFor(senderId), '', 'utf8');
+  clear(senderId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      await this.ensureDir();
+      await writeFile(this.pathFor(senderId), '', 'utf8');
+    });
   }
 
   /** All stored memories: sanitized user id, size, mtime, and a short preview. */
