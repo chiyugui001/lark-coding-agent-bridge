@@ -119,9 +119,15 @@ export class ZcodeAdapter implements AgentAdapter {
   }
 
   private runViaAppServer(opts: AgentRunOptions): AgentRun {
-    // Strict-fs whitelist: engine config changes need a fresh app-server.
+    // Strict-fs whitelist: engine config changes need a fresh app-server,
+    // and resumed sessions keep the tool set baked at creation — so a config
+    // change also forces a fresh session for this run.
     const fsWhitelist = opts.fsWhitelist ?? this.fsWhitelist;
-    if (syncZcodeFsWhitelist(fsWhitelist, opts.defaultWorkspaceDir ?? this.defaultWorkspaceDir ?? opts.cwd ?? '')) {
+    const whitelistChanged = syncZcodeFsWhitelist(
+      fsWhitelist,
+      opts.defaultWorkspaceDir ?? this.defaultWorkspaceDir ?? opts.cwd ?? '',
+    );
+    if (whitelistChanged) {
       void this.client?.dispose().catch(() => undefined);
       this.client = undefined;
     }
@@ -199,7 +205,7 @@ export class ZcodeAdapter implements AgentAdapter {
       let queue: AppServerSessionEvent[] = [];
       let waiters: Array<() => void> = [];
       try {
-        if (opts.sessionId) {
+        if (opts.sessionId && !whitelistChanged) {
           try {
             await client.request('session/resume', { sessionId: opts.sessionId });
             sessionId = opts.sessionId;
