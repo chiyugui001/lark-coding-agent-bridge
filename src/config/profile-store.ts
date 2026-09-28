@@ -57,6 +57,9 @@ type StoredProfileConfig = Pick<
   | 'workspaces'
   | 'permissions'
   | 'codex'
+  | 'zcode'
+  | 'memory'
+  | 'sessionScope'
   | 'attachments'
   | 'comments'
   | 'meeting'
@@ -96,6 +99,9 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     workspaces: profile.workspaces,
     permissions: profile.permissions,
     ...(profile.codex ? { codex: profile.codex } : {}),
+    ...(profile.zcode ? { zcode: profile.zcode } : {}),
+    memory: profile.memory,
+    sessionScope: profile.sessionScope,
     attachments: profile.attachments,
     comments: {},
     meeting: profile.meeting,
