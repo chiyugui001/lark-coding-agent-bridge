@@ -3,6 +3,24 @@ import { consumeCotEvents, CotClient, CotPublisher, cotBriefToolTitle, finalAnsw
 import type { AgentEvent } from '../../../src/agent/types.js';
 import type { RunState } from '../../../src/card/run-state.js';
 
+describe('COT concise summary selection', () => {
+  it('skips internal meta sentences and prefers the informative one', async () => {
+    const client = new FakeCotClient();
+    const publisher = new CotPublisher({
+      client, chatId: 'oc_chat', originMessageId: 'om_o', runId: 'run-x', scope: 'oc_chat', inputPreview: 'p',
+    });
+    await publisher.start();
+    await consumeCotEvents(iterate([
+      { type: 'thinking', delta: 'Lead with the outcome: PDF 输出 = USB U盘模式下的《Data Report》加密 PDF 报告。Since this was a question, I just report findings and stop. No ExitPlanMode needed (research task, no implementation). Final message must contain everything.' },
+      { type: 'done', terminationReason: 'normal' },
+    ]), publisher, { detail: 'concise' });
+    const reasoning = client.events
+      .filter((e) => e.event_type === 'REASONING_MESSAGE_CONTENT')
+      .map((e) => JSON.parse(e.content).delta);
+    expect(reasoning).toEqual(['Lead with the outcome: PDF 输出 = USB U盘模式下的《Data Report》加密 PDF 报告。']);
+  });
+});
+
 describe('COT concise mode', () => {
   it('condenses each reasoning burst to its last sentence, shows tool summaries, hides working text', async () => {
     const client = new FakeCotClient();
@@ -74,7 +92,8 @@ describe('COT minimal mode (read-only users)', () => {
     const steps = client.events
       .filter((e) => e.event_type === 'STEP_STARTED')
       .map((e) => JSON.parse(e.content).stepName);
-    expect(steps).toEqual(['理解用户问题', '思考中', '整理回复']);
+    expect(steps.slice(0, 3)).toEqual(['理解用户问题', '思考中', '整理回复']);
+    expect(steps[steps.length - 1]).toMatch(/任务完成（耗时 \d+\.\ds）/);
     const toolStart = client.events.find((e) => e.event_type === 'TOOL_CALL_START');
     expect(JSON.parse(toolStart?.content ?? '{}')).toMatchObject({ title: '调用工具: Read', toolCallName: 'Read' });
     // args/output still hidden

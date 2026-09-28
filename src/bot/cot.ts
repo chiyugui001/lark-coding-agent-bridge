@@ -260,17 +260,33 @@ export function finalAnswerOnlyState(state: RunState): RunState {
   };
 }
 
+/** Internal workflow notes that mean nothing to the chat user. */
+const CONCISE_META_RE =
+  /ExitPlanMode|plan mode|plan-mode|bridge_mode_notice|批准|approval|final message|report findings|no implementation|研究任务|只读模式|read-?only/i;
+
+function hasCjk(text: string): boolean {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
 /**
- * Condense a reasoning burst to its final sentence (the conclusion),
- * capped for the process bubble.
+ * Condense a reasoning burst to its most informative sentence. The tail of a
+ * burst is often internal meta ("No ExitPlanMode needed. Final message must
+ * contain everything.") — skip those, prefer the last user-relevant sentence
+ * (Chinese answers to Chinese users carry the substance), fall back to the
+ * longest, and cap for the process bubble.
  */
-function conciseSummary(text: string, max = 120): string {
+function conciseSummary(text: string, max = 200): string {
   const nl = String.fromCharCode(10);
   const sentences = text
     .split(new RegExp('(?<=[。！？!?])|' + nl))
     .map((part) => part.trim())
     .filter(Boolean);
-  const last = sentences[sentences.length - 1] ?? text.trim();
+  if (sentences.length === 0) return '';
+  const relevant = sentences.filter((s) => !CONCISE_META_RE.test(s));
+  const pool = relevant.length > 0 ? relevant : sentences;
+  const cjk = pool.filter(hasCjk);
+  const candidates = cjk.length > 0 ? cjk : pool;
+  const last = candidates[candidates.length - 1] ?? text.trim();
   return last.length > max ? last.slice(0, max) + '…' : last;
 }
 
@@ -287,6 +303,7 @@ export async function consumeCotEvents(
   const toolBrief = new Map<string, { name: string; input: unknown }>();
   const reasoningMessageId = `reasoning-${publisher.runId}`;
   const finalStepId = `step-process-${publisher.runId}`;
+  const startedAt = Date.now();
   const minimal = opts.detail === 'minimal';
   // concise: FastGPT-style progress — tool summaries visible, thinking
   // condensed to the last sentence of each burst, working text suppressed.
@@ -450,6 +467,11 @@ export async function consumeCotEvents(
             stepName: '输出过程',
           });
         }
+        const elapsedS = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const doneStepId = `step-done-${publisher.runId}`;
+        const doneStepName = `${evt.type === 'error' ? '任务失败' : '任务完成'}（耗时 ${elapsedS}s）`;
+        publisher.enqueue('STEP_STARTED', { stepId: doneStepId, stepName: doneStepName });
+        publisher.enqueue('STEP_FINISHED', { stepId: doneStepId, stepName: doneStepName });
         if (evt.type === 'error') {
           publisher.enqueue('RUN_ERROR', { message: evt.message, code: evt.terminationReason ?? 'error' });
           await publisher.finish('error');
