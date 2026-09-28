@@ -27,6 +27,10 @@ export interface FsWhitelistConfig {
 const MCP_SERVER_KEY = 'lark-fs';
 const NATIVE_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'] as const;
 
+function shouldHaveSubagentOff(sandbox: FsWhitelistConfig | undefined): boolean {
+  return sandbox?.enabled === true;
+}
+
 function engineConfigPath(): string {
   return join(homedir(), '.zcode', 'cli', 'config.json');
 }
@@ -67,6 +71,19 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
   if (changed) {
     mcp.servers = servers;
     raw.mcp = mcp;
+  }
+
+  // Subagents carry their own tool sets and ignore the main-session deny
+  // list — disable the capability outright while the whitelist is on.
+  const features = (raw.features ?? {}) as Record<string, unknown>;
+  if (shouldHaveSubagentOff(sandbox) && features.subagent !== false) {
+    features.subagent = false;
+    raw.features = features;
+    changed = true;
+  } else if (!shouldHaveSubagentOff(sandbox) && features.subagent === false) {
+    delete features.subagent;
+    raw.features = features;
+    changed = true;
   }
 
   const permission = (raw.permission ?? {}) as { disallowedTools?: string[] };

@@ -333,5 +333,5 @@ function claudeFsWhitelistArgs(
   const dir = mkdtempSync(join(tmpdir(), 'lark-fswl-'));
   const path = join(dir, 'mcp.json');
   writeFileSync(path, JSON.stringify(mcpConfig), 'utf8');
-  return ['--mcp-config', path, '--disallowedTools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'];
+  return ['--mcp-config', path, '--disallowedTools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'Task'];
 }
