@@ -103,8 +103,17 @@ describe('buildAgentPrompt userMemory', () => {
     expect(p).toContain(path.split(String.fromCharCode(92)).join(String.fromCharCode(92,92)));
   });
 
-  it('omits the block entirely when there is no memory', () => {
+  it('omits the block entirely when userMemory is not provided', () => {
     const p = buildAgentPrompt(base);
     expect(p).not.toContain('<user_memory>');
+  });
+
+  it('renders the protocol note even with empty memory content', () => {
+    const p = buildAgentPrompt({ ...base, userMemory: { content: '' } });
+    expect(p).toContain('<user_memory>');
+    expect(p).toContain('memory_write_protocol');
+    expect(p).toContain('memory_write');
+    // angle brackets are JSON-escaped inside the block
+    expect(p).not.toContain('<user_memory>undefined');
   });
 });

@@ -969,6 +969,9 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   };
   const capability = agentCapability(controls.profileConfig);
   const runStartedAt = Date.now();
+  // Memory write-back context: the bridge persists <memory_write> blocks
+  // after the run, so saving memories works even for read-only agents.
+  const memoryWriteContext = await buildMemoryWriteContext(controls, firstMsg.senderId);
   const flow = await startRunFlow({
     scopeId: scope,
     sessionScopeId,
@@ -1135,6 +1138,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         }
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
+    memory: memoryWriteContext,
           channel,
           chatId,
           scope,
@@ -1210,6 +1214,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       if (controls.profileConfig.agentKind === 'codex') {
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
+    memory: memoryWriteContext,
           channel,
           chatId,
           scope,
@@ -1274,6 +1279,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       if (controls.profileConfig.agentKind === 'codex') {
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
+    memory: memoryWriteContext,
           channel,
           chatId,
           scope,
@@ -1297,6 +1303,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       );
       await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
+    memory: memoryWriteContext,
         channel,
         chatId,
         scope,
@@ -1468,6 +1475,60 @@ async function recallStreamedMessage(
   }
 }
 
+/**
+ * Extract <memory_write>…</memory_write> blocks from the reply, append
+ * them to the sender's memory file, and strip the blocks from the
+ * outgoing state. The bridge performs the file write, so saving memories
+ * works even when the agent itself is read-only.
+ */
+function drainMemoryWrites(
+  state: RunState,
+  memory: { store: MemoryStore; senderId: string },
+): RunState {
+  const writes: string[] = [];
+  const strip = (text: string): string =>
+    text.replace(/<memory_write>([\s\S]*?)<\/memory_write>/g, (_match, inner: string) => {
+      const trimmed = String(inner).trim();
+      if (trimmed) writes.push(trimmed);
+      return '';
+    });
+  const blocks = state.blocks.map((b) =>
+    b.kind === 'text' ? { ...b, content: strip(b.content) } : b,
+  );
+  const finalText = state.finalText !== undefined ? strip(state.finalText) : undefined;
+  if (writes.length === 0) return state;
+  for (const w of writes) {
+    void memory.store.append(memory.senderId, w).catch((err: unknown) => {
+      log.warn('prompt', 'memory-write-failed', { message: (err as Error).message });
+    });
+  }
+  log.info('prompt', 'memory-write', {
+    entries: writes.length,
+    sender: memory.senderId.slice(-6),
+  });
+  return {
+    ...state,
+    blocks,
+    ...(finalText !== undefined ? { finalText: finalText.trim() } : {}),
+  };
+}
+
+async function buildMemoryWriteContext(
+  controls: Controls,
+  senderId: string,
+): Promise<{ store: MemoryStore; senderId: string } | undefined> {
+  if (!controls.profileConfig.memory.enabled || !senderId) return undefined;
+  try {
+    const appPaths = resolveAppPaths({
+      rootDir: dirname(controls.configPath),
+      profile: controls.profile,
+    });
+    return { store: new MemoryStore(join(appPaths.profileDir, 'memory')), senderId };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Prepend the elapsed-time line to the reply text (first line, all modes). */
 function withDurationLine(state: RunState, elapsedMs: number | undefined): RunState {
   if (elapsedMs === undefined) return state;
@@ -1494,8 +1555,14 @@ async function sendFinalReply(input: {
   cardRenderOptions: { signCallback?: (action: string) => string };
   /** Wall-clock run duration; rendered as the first line of the reply. */
   elapsedMs?: number;
+  /** When set, <memory_write> blocks in the reply are persisted to the
+   * sender's memory file and stripped from the outgoing text. */
+  memory?: { store: MemoryStore; senderId: string };
 }): Promise<void> {
-  const state = withDurationLine(input.state, input.elapsedMs);
+  let state = withDurationLine(input.state, input.elapsedMs);
+  if (input.memory) {
+    state = drainMemoryWrites(state, input.memory);
+  }
   const body = renderText(state);
 
   // Nothing deliverable to send (agent produced no text on a clean finish;
@@ -2041,7 +2108,6 @@ async function loadUserMemory(
       controls.profileConfig.memory.injectMaxBytes,
     );
     const content = await store.getForInjection(senderId);
-    if (!content) return undefined;
     const resolved = resolveUserAccessMode({
       permissions: controls.profileConfig.permissions,
       admins: controls.profileConfig.access.admins,

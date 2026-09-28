@@ -95,7 +95,7 @@ export interface BuildAgentPromptInput {
 export function buildAgentPrompt(input: BuildAgentPromptInput): string {
   const sections = [
     promptSection('bridge_context', input.context),
-    input.userMemory && input.userMemory.content
+    input.userMemory
       ? promptSection('user_memory', {
           note: '该用户跨会话的持久记忆。仅对此用户可见。',
           ...(input.userMemory.memoryFilePath
@@ -105,7 +105,9 @@ export function buildAgentPrompt(input: BuildAgentPromptInput): string {
                 memory_file: input.userMemory.memoryFilePath,
               }
             : {}),
-          memory: input.userMemory.content,
+          memory: input.userMemory.content || '（暂无记忆）',
+          memory_write_protocol:
+            '当用户要求把信息存入长期记忆时，在回复最末尾输出一个 <memory_write>要记的要点</memory_write> 块（简洁条目，可多行）。bridge 会负责写入记忆文件，你不需要也不要尝试自己写该文件。仅在用户明确要求记住内容时输出该块。',
         })
       : undefined,
     input.instructions && input.instructions.length > 0
