@@ -117,3 +117,13 @@ describe('buildAgentPrompt userMemory', () => {
     expect(p).not.toContain('<user_memory>undefined');
   });
 });
+
+describe('MemoryStore concurrent appends', () => {
+  it('preserves both entries when appends race', async () => {
+    const m = store();
+    await Promise.all([m.append('ou_a', '第一条'), m.append('ou_a', '第二条')]);
+    const content = await m.get('ou_a');
+    expect(content).toContain('第一条');
+    expect(content).toContain('第二条');
+  });
+});

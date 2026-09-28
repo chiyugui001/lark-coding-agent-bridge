@@ -1966,7 +1966,7 @@ function buildPrompt(
         : BRIDGE_AGENT_INSTRUCTIONS,
     userInput: userPart,
     ...(topicContext.length > 0 ? { topicContext: topicContext.map(toPromptTopicMessage) } : {}),
-    ...(userMemory && userMemory.content ? { userMemory } : {}),
+    ...(userMemory ? { userMemory } : {}),
     quotedMessages: quotes.map(toPromptQuote),
     interactiveCards: batch.map(toPromptInteractiveCard).filter(isDefined),
     attachments: attachments.map(toPromptAttachment),
