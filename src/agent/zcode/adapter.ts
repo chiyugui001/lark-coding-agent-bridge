@@ -120,7 +120,8 @@ export class ZcodeAdapter implements AgentAdapter {
 
   private runViaAppServer(opts: AgentRunOptions): AgentRun {
     // Strict-fs whitelist: engine config changes need a fresh app-server.
-    if (syncZcodeFsWhitelist(this.fsWhitelist, this.defaultWorkspaceDir ?? opts.cwd ?? '')) {
+    const fsWhitelist = opts.fsWhitelist ?? this.fsWhitelist;
+    if (syncZcodeFsWhitelist(fsWhitelist, opts.defaultWorkspaceDir ?? this.defaultWorkspaceDir ?? opts.cwd ?? '')) {
       void this.client?.dispose().catch(() => undefined);
       this.client = undefined;
     }

@@ -38,6 +38,9 @@ export interface AgentRunOptions {
   images?: readonly string[];
   sandbox?: CodexSandboxMode;
   permissionMode?: ClaudePermissionMode;
+  /** Bridge-level strict-fs whitelist, read live from the profile each run. */
+  fsWhitelist?: { enabled: boolean; dirs?: string[] };
+  defaultWorkspaceDir?: string;
   /**
    * Grace period (ms) between SIGTERM and SIGKILL when stop() is called on
    * the returned run. Lets the agent (and any subprocess it spawned, e.g.

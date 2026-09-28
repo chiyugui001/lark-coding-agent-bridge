@@ -91,7 +91,7 @@ export class ClaudeAdapter implements AgentAdapter {
     ];
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
-    const wlArgs = claudeFsWhitelistArgs(this.fsWhitelist, this.defaultWorkspaceDir ?? opts.cwd);
+    const wlArgs = claudeFsWhitelistArgs(opts.fsWhitelist ?? this.fsWhitelist, opts.defaultWorkspaceDir ?? this.defaultWorkspaceDir ?? opts.cwd);
     if (wlArgs) args.push(...wlArgs);
 
     const child = spawnProcess(this.binary, args, {

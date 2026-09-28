@@ -18,6 +18,7 @@ export interface RunExecutorDeps {
 export interface SubmitRunInput {
   scopeId: string;
   policy: RunPolicyAllow;
+  profileConfig?: import('../config/profile-schema').ProfileConfig;
   sessionId?: string;
   threadId?: string;
   model?: string;
@@ -103,6 +104,9 @@ export class RunExecutor {
       images: input.images,
       sandbox: input.policy.sandbox,
       permissionMode: input.policy.permissionMode,
+      ...(input.profileConfig?.fsWhitelist
+        ? { fsWhitelist: input.profileConfig?.fsWhitelist, defaultWorkspaceDir: input.profileConfig?.workspaces.default }
+        : {}),
       stopGraceMs: input.stopGraceMs,
     };
     let run: AgentRun;
@@ -143,6 +147,9 @@ export class RunExecutor {
       accessMode: input.policy.accessMode,
       sandbox: input.policy.sandbox,
       permissionMode: input.policy.permissionMode,
+      ...(input.profileConfig?.fsWhitelist
+        ? { fsWhitelist: input.profileConfig?.fsWhitelist, defaultWorkspaceDir: input.profileConfig?.workspaces.default }
+        : {}),
     });
 
     let handle: RunHandle;
