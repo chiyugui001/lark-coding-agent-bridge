@@ -5,6 +5,8 @@ import { canonicalizeJcs } from '../session/jcs';
 export interface FingerprintInputV2 {
   cwdRealpath: string;
   sandbox: SandboxMode;
+  /** Effective per-user access mode for this run — different users must not share catalog keys. */
+  accessMode?: string;
   accessPolicyDigest: string;
   resourceScopeDigest: string;
   attachmentPolicyShapeDigest: string;
@@ -36,6 +38,7 @@ export function policyFingerprint(input: FingerprintInputV2): string {
     version: 2,
     cwdRealpath: input.cwdRealpath,
     sandbox: input.sandbox,
+    accessMode: input.accessMode ?? null,
     accessPolicyDigest: input.accessPolicyDigest,
     resourceScopeDigest: input.resourceScopeDigest,
     attachmentPolicyShapeDigest: input.attachmentPolicyShapeDigest,

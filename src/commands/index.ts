@@ -43,7 +43,7 @@ import type {
 } from '../config/profile-schema';
 import { effectiveLarkCliIdentity } from '../config/profile-schema';
 import { resolveAppPaths } from '../config/app-paths';
-import { accessToClaudePermissionMode } from '../config/permissions';
+import { accessToClaudePermissionMode, resolveUserAccessMode } from '../config/permissions';
 import {
   canRunAdminCommand,
   canUseDm,
@@ -186,6 +186,7 @@ const handlers: Record<string, Handler> = {
   '/invite': handleInvite,
   '/remove': handleRemove,
   '/meeting': handleMeeting,
+  '/grant': handleGrant,
 };
 
 /**
@@ -204,6 +205,7 @@ const ADMIN_COMMANDS = new Set([
   '/ws',
   '/invite',
   '/remove',
+  '/grant',
   // Joining a meeting makes the bot visible to every participant and exposes
   // meeting content to the agent — owner/admin only.
   '/meeting',
@@ -760,24 +762,24 @@ function selectedResumeCwd(ctx: CommandContext): string | undefined {
 }
 
 function runtimeAccessStatus(
-  profileConfig: ProfileConfig,
+  ctx: CommandContext,
 ): { label: string; value: string } {
-  if (profileConfig.agentKind === 'zcode') {
-    return { label: 'mode', value: 'yolo' };
-  }
+  const profileConfig = ctx.controls.profileConfig;
+  const resolved = resolveUserAccessMode({
+    permissions: profileConfig.permissions,
+    admins: profileConfig.access.admins,
+    senderId: ctx.msg.senderId,
+    isOwner: canRunAdminCommand(profileConfig, ctx.controls, ctx.msg.senderId).reason === 'owner',
+  });
+  const suffix = resolved.source === 'default' ? '' : `（${resolved.source}）`;
+  const base = `你: ${resolved.mode}${suffix} · 默认: ${profileConfig.permissions.defaultAccess}`;
   if (profileConfig.agentKind === 'claude') {
     return {
       label: 'permission',
-      value: accessToClaudePermissionMode(
-        profileConfig.permissions.defaultAccess,
-        profileConfig.permissions,
-      ),
+      value: `${base} · ${accessToClaudePermissionMode(resolved.mode, profileConfig.permissions)}`,
     };
   }
-  return {
-    label: 'sandbox',
-    value: `${profileConfig.sandbox.defaultMode}/${profileConfig.sandbox.maxMode}`,
-  };
+  return { label: 'access', value: base };
 }
 
 async function larkCliStatus(ctx: CommandContext): Promise<'app' | 'user-ready' | 'user-missing' | 'check-failed'> {
@@ -827,7 +829,7 @@ async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
     emptySessionText: isCodex ? '(未建立)' : undefined,
     sessionStale: !isCodex && Boolean(cwd && sess && sess.cwd !== cwd),
     agentName: ctx.agent.displayName,
-    runtimeAccess: runtimeAccessStatus(ctx.controls.profileConfig),
+    runtimeAccess: runtimeAccessStatus(ctx),
     larkCliStatus: await larkCliStatus(ctx),
     activeRun: Boolean(ctx.activeRuns.get(ctx.scope)),
     activeScopes: ctx.activeRuns.scopes().filter((scope) => !scope.startsWith('comment:')),
@@ -848,6 +850,72 @@ function formatOwnerState(ctx: CommandContext): string {
     : '';
   return `${state} owner=${owner}${refreshed}`;
 }
+
+/**
+ * `/grant` (admin) — per-user agent access overrides.
+ *   /grant                      show current overrides and your own open_id
+ *   /grant <open_id|me> <read-only|workspace|full|reset>
+ */
+async function handleGrant(args: string, ctx: CommandContext): Promise<void> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const permissions = ctx.controls.profileConfig.permissions;
+  const userAccess = { ...(permissions.userAccess ?? {}) };
+
+  if (parts.length === 0) {
+    const entries = Object.entries(userAccess)
+      .map(([id, mode]) => `- \`${id.slice(-8)}\` (${id}): ${mode}`)
+      .join('\n');
+    await reply(
+      ctx,
+      [
+        `你的 open_id: \`${ctx.msg.senderId}\``,
+        `adminAccess: ${permissions.adminAccess ?? '（未设置，等同默认）'}`,
+        '当前按用户覆盖:',
+        entries || '（无）',
+        '',
+        '用法: `/grant <open_id|me> <read-only|workspace|full|reset>`',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  if (parts.length !== 2) {
+    await reply(ctx, '用法: `/grant <open_id|me> <read-only|workspace|full|reset>`');
+    return;
+  }
+  const rawTarget = parts[0] ?? '';
+  const mode = parts[1] ?? '';
+  const target = rawTarget === 'me' ? ctx.msg.senderId : rawTarget;
+  if (!target.startsWith('ou_')) {
+    await reply(ctx, '❌ 目标必须是 open_id（ou_ 开头）或 `me`。');
+    return;
+  }
+  if (mode === 'reset') {
+    delete userAccess[target];
+  } else if (mode === 'read-only' || mode === 'workspace' || mode === 'full') {
+    userAccess[target] = mode;
+  } else {
+    await reply(ctx, '❌ 档位必须是 read-only / workspace / full / reset。');
+    return;
+  }
+
+  try {
+    await configOps.savePermissionsConfig(ctx.controls, (current) => ({
+      ...current,
+      ...(Object.keys(userAccess).length > 0 ? { userAccess } : {}),
+    }));
+  } catch (err) {
+    log.fail('command', err as Error, { step: 'grant.save' });
+    await reply(ctx, `❌ 保存失败: ${(err as Error).message}`);
+    return;
+  }
+  const label =
+    mode === 'reset'
+      ? '已移除该用户的覆盖（回落默认档）'
+      : `已将 ${target.slice(-8)} 设为 ${mode}`;
+  await reply(ctx, `✅ ${label}。下一轮对话生效。`);
+}
+
 
 async function handleStop(args: string, ctx: CommandContext): Promise<void> {
   const targetScope = args.trim();
@@ -1158,7 +1226,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
     );
     return;
   }
-  const runtimeAccess = runtimeAccessStatus(ctx.controls.profileConfig);
+  const runtimeAccess = runtimeAccessStatus(ctx);
   const doctorReport = (echoCheck: string): string =>
     buildDoctorReport(ctx, {
       workspaceCheck: `ok (${workspace.cwdRealpath})`,
@@ -1289,7 +1357,7 @@ function buildDoctorReport(
     ? `${queue.active}/${queue.cap} active, ${queue.waiting} waiting`
     : 'unknown';
   const cwd = effectiveWorkspaceCwd(ctx);
-  const runtimeAccess = runtimeAccessStatus(ctx.controls.profileConfig);
+  const runtimeAccess = runtimeAccessStatus(ctx);
   const access =
     ctx.msg.chatType === 'p2p'
       ? canUseDm(ctx.controls.profileConfig, ctx.controls, ctx.msg.senderId)

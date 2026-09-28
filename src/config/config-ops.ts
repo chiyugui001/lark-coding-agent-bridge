@@ -209,3 +209,37 @@ export async function savePreferencesConfig(
     state.cfg = runtimeProfileConfig(root, state.profile);
   });
 }
+
+/**
+ * Mutate the profile's agent permission config (per-user access overrides,
+ * admin access, defaults) under the config file lock, persisting to disk and
+ * refreshing in-memory state. Mirrors {@link saveAccessConfig}.
+ */
+export async function savePermissionsConfig(
+  state: MutableProfileState,
+  mutate: (permissions: ProfileConfig['permissions']) => ProfileConfig['permissions'],
+): Promise<ProfileConfig['permissions']> {
+  return withConfigFileLock(state.configPath, async () => {
+    const root = await loadRootConfig(state.configPath);
+    if (!root) {
+      const permissions = mutate(state.profileConfig.permissions);
+      state.profileConfig = { ...state.profileConfig, permissions };
+      // Legacy v1 configs carry profile fields inline on the config object.
+      (state.cfg as AppConfig & { permissions?: typeof permissions }).permissions = permissions;
+      await saveConfig(state.cfg, state.configPath);
+      return permissions;
+    }
+
+    const profile = root.profiles[state.profile];
+    if (!profile) throw new Error(`profile not found: ${state.profile}`);
+    const permissions = mutate(profile.permissions);
+    root.profiles[state.profile] = { ...profile, permissions };
+    await saveRootConfig(root, state.configPath);
+    state.profileConfig = root.profiles[state.profile]!;
+    state.cfg = runtimeProfileConfig(root, state.profile);
+    log.info('config-ops', 'permissions-mutated', {
+      userAccessEntries: Object.keys(permissions.userAccess ?? {}).length,
+    });
+    return permissions;
+  });
+}

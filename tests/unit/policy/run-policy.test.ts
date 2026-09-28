@@ -214,3 +214,63 @@ function scope(overrides: Partial<ScopeContext> = {}): ScopeContext {
     ...overrides,
   };
 }
+
+describe('run policy per-user access', () => {
+  it('resolves a different permission mode per user from userAccess', () => {
+    const cfg = profile();
+    cfg.permissions = {
+      defaultAccess: 'read-only',
+      maxAccess: 'full',
+      userAccess: { ou_vip: 'full' },
+    };
+    cfg.access = { ...cfg.access, admins: ['ou_admin'] };
+
+    const vip = evaluateRunPolicy({ ...baseInput(), profileConfig: cfg, scope: scope({ actorId: 'ou_vip' }) });
+    const regular = evaluateRunPolicy({
+      ...baseInput(),
+      profileConfig: cfg,
+      scope: scope({ actorId: 'ou_somebody' }),
+    });
+    const admin = evaluateRunPolicy({
+      ...baseInput(),
+      profileConfig: cfg,
+      scope: scope({ actorId: 'ou_admin' }),
+    });
+
+    expect(vip.ok && vip.permissionMode).toBe('bypassPermissions');
+    expect(regular.ok && regular.permissionMode).toBe('plan');
+    expect(admin.ok && admin.permissionMode).toBe('plan');
+    if (vip.ok && regular.ok) {
+      expect(vip.policyFingerprint).not.toBe(regular.policyFingerprint);
+    }
+  });
+
+  it('admins get adminAccess when configured', () => {
+    const cfg = profile();
+    cfg.permissions = {
+      defaultAccess: 'read-only',
+      maxAccess: 'full',
+      adminAccess: 'full',
+    };
+    cfg.access = { ...cfg.access, admins: ['ou_admin'] };
+
+    const admin = evaluateRunPolicy({
+      ...baseInput(),
+      profileConfig: cfg,
+      scope: scope({ actorId: 'ou_admin' }),
+    });
+    expect(admin.ok && admin.permissionMode).toBe('bypassPermissions');
+  });
+
+  it('owner resolves to maxAccess', () => {
+    const cfg = profile();
+    cfg.permissions = { defaultAccess: 'read-only', maxAccess: 'full' };
+
+    const owner = evaluateRunPolicy({
+      ...baseInput(),
+      profileConfig: cfg,
+      access: { ok: true, reason: 'owner' },
+    });
+    expect(owner.ok && owner.permissionMode).toBe('bypassPermissions');
+  });
+});

@@ -8,6 +8,18 @@ export interface PermissionConfig {
   claude?: {
     permissionMode?: ClaudePermissionMode;
   };
+  /**
+   * Per-user access-mode overrides keyed by Feishu open_id. Wins over every
+   * other rule for that user (including the owner rule). Entries must not
+   * exceed maxAccess.
+   */
+  userAccess?: Record<string, AccessMode>;
+  /**
+   * Access mode applied to members of `access.admins` without an explicit
+   * `userAccess` entry. Defaults to `defaultAccess` (the pre-existing
+   * behavior: being an admin never raised the agent's own permissions).
+   */
+  adminAccess?: AccessMode;
 }
 
 export type PermissionSource = 'permissions' | 'sandbox' | 'default';
@@ -166,11 +178,77 @@ function normalizeCanonicalPermissions(
   if (claude?.permissionMode) {
     assertClaudePermissionWithinAccess(claude.permissionMode, maxAccess);
   }
+  const userAccess = normalizeUserAccess(input.userAccess, maxAccess);
+  const adminAccess = readAccessWithin(input.adminAccess, 'adminAccess', maxAccess);
   return {
     defaultAccess,
     maxAccess,
     ...(claude ? { claude } : {}),
+    ...(Object.keys(userAccess).length > 0 ? { userAccess } : {}),
+    ...(adminAccess ? { adminAccess } : {}),
   };
+}
+
+function normalizeUserAccess(
+  input: PermissionConfig['userAccess'],
+  maxAccess: AccessMode,
+): Record<string, AccessMode> {
+  if (input === undefined) return {};
+  if (!isConfigObject(input)) {
+    throw new Error('invalid permission userAccess');
+  }
+  const out: Record<string, AccessMode> = {};
+  for (const [userId, mode] of Object.entries(input)) {
+    if (!userId.trim()) throw new Error('invalid permission userAccess: empty user id');
+    const resolved = readAccessWithin(mode, `userAccess.${userId}`, maxAccess);
+    if (!resolved) throw new Error(`invalid permission userAccess.${userId}`);
+    out[userId] = resolved;
+  }
+  return out;
+}
+
+function readAccessWithin(
+  value: unknown,
+  field: string,
+  maxAccess: AccessMode,
+): AccessMode | undefined {
+  if (value === undefined) return undefined;
+  if (!isAccessMode(value)) {
+    throw new Error(`invalid permission ${field}`);
+  }
+  if (ACCESS_ORDER[value] > ACCESS_ORDER[maxAccess]) {
+    throw new Error(`permission ${field} cannot exceed maxAccess`);
+  }
+  return value;
+}
+
+export type UserAccessSource = 'userAccess' | 'owner' | 'adminAccess' | 'default';
+
+export interface ResolvedUserAccess {
+  mode: AccessMode;
+  source: UserAccessSource;
+}
+
+/**
+ * Resolve the effective agent access mode for one sender. Priority:
+ * explicit userAccess entry > owner (profile maxAccess) > adminAccess for
+ * access.admins members > defaultAccess. The result still needs the usual
+ * capability clamp at policy evaluation.
+ */
+export function resolveUserAccessMode(input: {
+  permissions: Pick<PermissionConfig, 'defaultAccess' | 'maxAccess' | 'userAccess' | 'adminAccess'>;
+  admins: readonly string[];
+  senderId: string;
+  isOwner: boolean;
+}): ResolvedUserAccess {
+  const explicit = input.permissions.userAccess?.[input.senderId];
+  if (explicit) return { mode: explicit, source: 'userAccess' };
+  if (input.isOwner) return { mode: input.permissions.maxAccess, source: 'owner' };
+  if (input.admins.includes(input.senderId)) {
+    const adminMode = input.permissions.adminAccess ?? input.permissions.defaultAccess;
+    return { mode: adminMode, source: input.permissions.adminAccess ? 'adminAccess' : 'default' };
+  }
+  return { mode: input.permissions.defaultAccess, source: 'default' };
 }
 
 function defaultPermissions(): PermissionConfig {

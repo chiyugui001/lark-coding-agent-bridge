@@ -3,6 +3,7 @@ import {
   accessToClaudePermissionMode,
   accessToCodexSandbox,
   clampAccess,
+  resolveUserAccessMode,
   type AccessMode,
   type ClaudePermissionMode,
   type CodexSandboxMode,
@@ -104,8 +105,14 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     return reject('required-attachment-rejected', '必需附件未通过校验，已拒绝运行。');
   }
 
+  const resolvedAccess = resolveUserAccessMode({
+    permissions: input.profileConfig.permissions,
+    admins: input.profileConfig.access.admins,
+    senderId: input.scope.actorId,
+    isOwner: input.access.reason === 'owner',
+  });
   const accessMode = clampAccess(
-    input.profileConfig.permissions.defaultAccess,
+    resolvedAccess.mode,
     input.profileConfig.permissions.maxAccess,
     input.capability.permissions.maxAccess,
   );
@@ -141,6 +148,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     policyFingerprint: policyFingerprint({
       cwdRealpath: input.cwdRealpath,
       sandbox,
+      accessMode,
       accessPolicyDigest: accessDigest,
       resourceScopeDigest: resourceDigest,
       attachmentPolicyShapeDigest: attachmentDigest,
