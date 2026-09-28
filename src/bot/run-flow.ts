@@ -22,6 +22,12 @@ import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
 
 export interface StartRunFlowInput {
+  /**
+   * Key for session continuity when it differs from the queueing scope
+   * (chat+user isolation): sessions/catalog use this, executor queueing
+   * keeps scopeId. Defaults to scopeId.
+   */
+  sessionScopeId?: string;
   scopeId: string;
   scope: ScopeContext;
   prompt: string;
@@ -67,6 +73,8 @@ export type StartRunFlowResult =
 
 export interface RecordRunSessionEventInput {
   scopeId: string;
+  /** Session-continuity key override; defaults to scopeId. */
+  sessionScopeId?: string;
   sessions: SessionStore;
   sessionCatalog?: SessionCatalog;
   capability: AgentCapability;
@@ -75,6 +83,7 @@ export interface RecordRunSessionEventInput {
 }
 
 export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFlowResult> {
+  const sessionKey = input.sessionScopeId ?? input.scopeId;
   const requestedCwd =
     input.workspaces.cwdFor(input.scopeId) ?? input.profileConfig.workspaces.default ?? '';
   const workspace = await resolveWorkingDirectory(requestedCwd);
@@ -115,7 +124,7 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
   let threadId: string | undefined;
   if (input.sessionCatalog) {
     const catalogEntry = input.sessionCatalog.activeFor({
-      scopeId: input.scopeId,
+      scopeId: sessionKey,
       agentId: input.capability.agentId,
       cwdRealpath: workspace.cwdRealpath,
       policyFingerprint: policy.policyFingerprint,
@@ -132,11 +141,11 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
     !resumeFrom &&
     (input.capability.agentId === 'claude' || input.capability.agentId === 'zcode')
   ) {
-    resumeFrom = input.sessions.resumeFor(input.scopeId, workspace.cwdRealpath);
+    resumeFrom = input.sessions.resumeFor(sessionKey, workspace.cwdRealpath);
     sessionId = resumeFrom;
-    const stale = input.sessions.getRaw(input.scopeId);
+    const stale = input.sessions.getRaw(sessionKey);
     if (!resumeFrom && stale?.cwd && stale.cwd !== workspace.cwdRealpath) {
-      input.sessions.clear(input.scopeId);
+      input.sessions.clear(sessionKey);
     }
   }
 
@@ -191,15 +200,16 @@ export async function startRunFlow(input: StartRunFlowInput): Promise<StartRunFl
 
 export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   if (input.event.type !== 'system') return;
+  const sessionKey = input.sessionScopeId ?? input.scopeId;
   if (
     (input.capability.agentId === 'claude' || input.capability.agentId === 'zcode') &&
     input.event.sessionId
   ) {
     const agentId = input.capability.agentId;
     const cwdRealpath = input.event.cwd ?? input.policy.cwdRealpath;
-    input.sessions.set(input.scopeId, input.event.sessionId, cwdRealpath);
+    input.sessions.set(sessionKey, input.event.sessionId, cwdRealpath);
     input.sessionCatalog?.upsertActive({
-      scopeId: input.scopeId,
+      scopeId: sessionKey,
       agentId,
       cwdRealpath,
       policyFingerprint: input.policy.policyFingerprint,
@@ -209,7 +219,7 @@ export function recordRunSessionEvent(input: RecordRunSessionEventInput): void {
   }
   if (input.capability.agentId === 'codex' && input.event.threadId) {
     input.sessionCatalog?.upsertActive({
-      scopeId: input.scopeId,
+      scopeId: sessionKey,
       agentId: 'codex',
       cwdRealpath: input.policy.cwdRealpath,
       policyFingerprint: input.policy.policyFingerprint,

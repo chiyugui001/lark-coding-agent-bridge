@@ -176,6 +176,13 @@ export interface ProfileConfig {
   codex?: CodexConfig;
   zcode?: ZcodeConfig;
   memory: MemoryConfig;
+  /**
+   * Session continuity scope for group chats. `chat` (default) keeps one
+   * agent session per chat; `chat+user` keys sessions by chat AND sender,
+   * so each member carries their own conversation context. Private chats
+   * are unaffected (already one user per chat).
+   */
+  sessionScope: 'chat' | 'chat+user';
   attachments: AttachmentConfig;
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
@@ -258,6 +265,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     codex?: CodexConfig & { flags?: unknown };
     zcode?: ZcodeConfig;
     memory?: Partial<MemoryConfig>;
+    sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
@@ -310,6 +318,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
         ? { injectMaxBytes: raw.memory.injectMaxBytes }
         : {}),
     },
+    sessionScope: raw.sessionScope === 'chat+user' ? 'chat+user' : 'chat',
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
       maxBytes: numberOr(raw.attachments?.maxBytes, 100 * 1024 * 1024),

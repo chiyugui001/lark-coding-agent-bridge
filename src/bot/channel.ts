@@ -955,6 +955,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     firstMsg.chatType === 'p2p'
       ? canUseDm(controls.profileConfig, controls, firstMsg.senderId)
       : canUseGroup(controls.profileConfig, controls, firstMsg.chatId, firstMsg.senderId);
+  // chat+user isolation: sessions/catalog key by sender inside group chats;
+  // queueing, active-run and per-chat workspace state stay keyed by chat.
+  const sessionScopeId =
+    controls.profileConfig.sessionScope === 'chat+user' && firstMsg.chatType === 'group'
+      ? `${scope}\u001f${firstMsg.senderId}`
+      : scope;
   const scopeContext: ScopeContext = {
     source: 'im',
     chatId,
@@ -964,6 +970,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const capability = agentCapability(controls.profileConfig);
   const flow = await startRunFlow({
     scopeId: scope,
+    sessionScopeId,
     scope: scopeContext,
     prompt,
     attachments: attachments.map(toPolicyAttachment),
