@@ -1497,7 +1497,10 @@ function drainMemoryWrites(
   );
   const finalText = state.finalText !== undefined ? strip(state.finalText) : undefined;
   if (writes.length === 0) return state;
-  for (const w of writes) {
+  // The same block usually appears in BOTH the streamed text blocks and
+  // finalText — dedupe within this run or it gets appended twice.
+  const unique = [...new Set(writes)];
+  for (const w of unique) {
     void memory.store.append(memory.senderId, w).catch((err: unknown) => {
       log.warn('prompt', 'memory-write-failed', { message: (err as Error).message });
     });
