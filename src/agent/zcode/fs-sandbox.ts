@@ -76,9 +76,17 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
   // workspace (one process routes every project graph under the roots).
   // Mounted only while the whitelist is on and the router bundle exists.
   const wlDirs = (sandbox?.dirs?.length ? sandbox.dirs : [defaultDir]).map((d) => d.trim()).filter(Boolean);
-  const distDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-  const routerPath = join(distDir, 'graphify-router.js');
-  if (sandbox?.enabled && wlDirs.length > 0 && existsSync(routerPath)) {
+  // tsup bundles everything into dist/cli.js (no dist/agent/zcode/ nesting),
+  // so walk upward from this module's location to find the sibling router.
+  let routerPath: string | undefined;
+  for (let dir = dirname(fileURLToPath(import.meta.url)); dir && dir !== dirname(dir); dir = dirname(dir)) {
+    const candidate = join(dir, 'graphify-router.js');
+    if (existsSync(candidate)) {
+      routerPath = candidate;
+      break;
+    }
+  }
+  if (sandbox?.enabled && wlDirs.length > 0 && routerPath) {
     const desiredRouter = {
       type: 'stdio',
       command: process.execPath,
