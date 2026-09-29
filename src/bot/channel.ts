@@ -5,6 +5,7 @@ import type {
 } from '@larksuite/channel';
 import { createLarkChannel } from '@larksuite/channel';
 import { dirname, join } from 'node:path';
+import { readdir, access } from 'node:fs/promises';
 import { agentCapability } from '../agent/capability';
 import { modelLabel, normalizeModelSelection, resolveModelArg } from '../agent/models';
 import {
@@ -917,6 +918,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       ]
     : undefined;
 
+  // Portable graphify hint: when the strict-fs whitelist is active and the
+  // workspace carries graphify knowledge graphs, teach the agent to query
+  // them with file tools (Bash is denied under the whitelist).
+  const graphifyHint =
+    controls.profileConfig.fsWhitelist?.enabled && (await detectGraphifyWorkspace(workspaces, controls, scope))
+      ? [
+          '【知识图谱检索（本环境无命令行）】本工作区存在 graphify 知识图谱（各项目 graphify-out/graph.json，纯 JSON 文件）。回答代码相关问题时优先查图谱而不是通读源码：用文件工具定位并读取目标项目的 graph.json（大文件分段读），从 nodes（label/kind/源码位置）与 edges（调用/包含关系）检索目标符号；查到位置后按位置精读源码片段。图谱不可用时才回退直接读源码。',
+        ]
+      : undefined;
+  const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? [])];
+
   const userMemory = await loadUserMemory(controls, batch[0]?.senderId ?? '');
 
   const prompt = buildPrompt(
@@ -925,7 +937,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     quotes,
     topicContext,
     channel.botIdentity,
-    extraInstructions,
+    instructions.length > 0 ? instructions : undefined,
     userMemory,
   );
   log.info('prompt', 'built', {
@@ -2126,5 +2138,27 @@ async function loadUserMemory(
   } catch (err) {
     log.warn('prompt', 'memory-load-failed', { message: (err as Error).message });
     return undefined;
+  }
+}
+
+/** True when the workspace (or any first-level project dir) has a graphify graph. */
+async function detectGraphifyWorkspace(workspaces: WorkspaceStore, controls: Controls, scope: string): Promise<boolean> {
+  try {
+    const root = workspaces.cwdFor(scope) ?? controls.profileConfig.workspaces.default;
+    if (!root) return false;
+    const entries = await readdir(root, { withFileTypes: true });
+    if (entries.some((e) => e.isDirectory() && e.name === 'graphify-out')) return true;
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue;
+      try {
+        await access(join(root, e.name, 'graphify-out'));
+        return true;
+      } catch {
+        // not this project
+      }
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
