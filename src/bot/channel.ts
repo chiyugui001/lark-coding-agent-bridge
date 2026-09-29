@@ -2184,4 +2184,3 @@ async function scanForGraphifyOut(dir: string, depth: number): Promise<boolean> 
   }
   return false;
 }
-}
