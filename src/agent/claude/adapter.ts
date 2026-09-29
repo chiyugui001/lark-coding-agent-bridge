@@ -325,8 +325,10 @@ function claudeFsWhitelistArgs(
     mcpServers: {
       'lark-fs': {
         type: 'stdio',
-        command: 'cmd',
-        args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', ...dirs],
+        // Windows needs the cmd shim for npx; POSIX spawns npx directly.
+        ...(process.platform === 'win32'
+          ? { command: 'cmd', args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', ...dirs] }
+          : { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', ...dirs] }),
       },
     },
   };

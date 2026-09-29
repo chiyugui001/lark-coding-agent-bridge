@@ -56,8 +56,10 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
     const dirs = sandbox.dirs!.map((d) => d.trim()).filter(Boolean);
     const desired = {
       type: 'stdio',
-      command: 'cmd',
-      args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', ...dirs],
+      // Windows needs the cmd shim for npx; POSIX spawns npx directly.
+      ...(process.platform === 'win32'
+        ? { command: 'cmd', args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-filesystem', ...dirs] }
+        : { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', ...dirs] }),
       enabled: true,
     };
     if (JSON.stringify(servers[MCP_SERVER_KEY]) !== JSON.stringify(desired)) {
