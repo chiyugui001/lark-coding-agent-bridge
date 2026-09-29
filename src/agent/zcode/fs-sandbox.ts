@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { log } from '../../core/logger';
 
 /**
@@ -68,6 +69,28 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
     }
   } else if (MCP_SERVER_KEY in servers) {
     delete servers[MCP_SERVER_KEY];
+    changed = true;
+  }
+
+  // Graph router MCP: graphify knowledge-graph query tools for the whole
+  // workspace (one process routes every project graph under the roots).
+  // Mounted only while the whitelist is on and the router bundle exists.
+  const wlDirs = (sandbox?.dirs?.length ? sandbox.dirs : [defaultDir]).map((d) => d.trim()).filter(Boolean);
+  const distDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const routerPath = join(distDir, 'graphify-router.js');
+  if (sandbox?.enabled && wlDirs.length > 0 && existsSync(routerPath)) {
+    const desiredRouter = {
+      type: 'stdio',
+      command: process.execPath,
+      args: [routerPath, ...wlDirs],
+      enabled: true,
+    };
+    if (JSON.stringify(servers['lark-graph']) !== JSON.stringify(desiredRouter)) {
+      servers['lark-graph'] = desiredRouter;
+      changed = true;
+    }
+  } else if ('lark-graph' in servers) {
+    delete servers['lark-graph'];
     changed = true;
   }
   if (changed) {

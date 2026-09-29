@@ -924,7 +924,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const graphifyHint =
     controls.profileConfig.fsWhitelist?.enabled && (await detectGraphifyWorkspace(workspaces, controls, scope))
       ? [
-          '【知识图谱检索（本环境无命令行）】本工作区存在 graphify 知识图谱（各项目 graphify-out/graph.json，纯 JSON 文件）。回答代码相关问题时优先查图谱而不是通读源码：用文件工具定位并读取目标项目的 graph.json（大文件分段读），从 nodes（label/kind/源码位置）与 edges（调用/包含关系）检索目标符号；查到位置后按位置精读源码片段。图谱不可用时才回退直接读源码。',
+          '【知识图谱检索】本工作区存在 graphify 知识图谱，且已挂载图谱查询 MCP 工具（graph_list_projects / graph_query / graph_path / graph_explain）。回答代码相关问题时**优先用这些 MCP 图谱工具**：先 graph_list_projects 找到目标项目 id，再用 graph_query（自然语言问题）或 graph_path（两符号间调用路径）/graph_explain（单符号解释）查询；结果自带源码位置，需要细节时按位置精读源码片段。只有图谱工具不可用或无结果时才回退读源码，不要直接通读大文件，也不要手动读 graph.json 原文（体积大，用查询工具）。',
         ]
       : undefined;
   const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? [])];
