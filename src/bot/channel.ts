@@ -2141,24 +2141,47 @@ async function loadUserMemory(
   }
 }
 
-/** True when the workspace (or any first-level project dir) has a graphify graph. */
+const graphifyDetectCache = new Map<string, boolean>();
+
+/**
+ * True when the workspace tree contains a graphify graph — checked at the
+ * root, one and two levels down (product-line layouts like sensor/lora/<proj>
+ * keep graphs two levels deep). Cached per root for the process lifetime.
+ */
 async function detectGraphifyWorkspace(workspaces: WorkspaceStore, controls: Controls, scope: string): Promise<boolean> {
   try {
     const root = workspaces.cwdFor(scope) ?? controls.profileConfig.workspaces.default;
     if (!root) return false;
-    const entries = await readdir(root, { withFileTypes: true });
-    if (entries.some((e) => e.isDirectory() && e.name === 'graphify-out')) return true;
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue;
-      try {
-        await access(join(root, e.name, 'graphify-out'));
-        return true;
-      } catch {
-        // not this project
-      }
-    }
-    return false;
+    const cached = graphifyDetectCache.get(root);
+    if (cached !== undefined) return cached;
+    const found = await scanForGraphifyOut(root, 0);
+    graphifyDetectCache.set(root, found);
+    return found;
   } catch {
     return false;
   }
+}
+
+const GRAPHIFY_MAX_DEPTH = 2;
+
+async function scanForGraphifyOut(dir: string, depth: number): Promise<boolean> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const subdirs: string[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue;
+    if (e.name === 'graphify-out') return true;
+    subdirs.push(e.name);
+  }
+  if (depth >= GRAPHIFY_MAX_DEPTH) return false;
+  for (const name of subdirs) {
+    // hidden/node_modules-scale dirs are not worth descending
+    if (name === 'node_modules' || name === 'Middlewares' || name === 'Drivers') continue;
+    try {
+      if (await scanForGraphifyOut(join(dir, name), depth + 1)) return true;
+    } catch {
+      // unreadable subdir — skip
+    }
+  }
+  return false;
+}
 }
