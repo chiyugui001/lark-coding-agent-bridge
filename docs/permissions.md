@@ -146,3 +146,25 @@ round-trip 回归测试（tests/unit/config/root-config-roundtrip.test.ts）
    变更自动开新会话（历史上下文丢失）；
 5. 桌面控制插件（computer-use/browser-use）在 CLI 侧默认禁用 +
   disallowedTools 兜底，桌面版 GUI 不受影响。
+
+## 八、一键安全部署
+
+完整权限方案可通过单条命令打到已有 profile 上：
+
+```bash
+lark-channel-bridge profile secure <name> [--dirs "D:/path1,D:/path2"]
+```
+
+预设内容：
+
+| 项 | 值 |
+|---|---|
+| 默认/上限权限 | read-only（后续按用户提权：先调高 maxAccess 再 `/grant`） |
+| 每用户记忆 | 开启（memory_write 协议 + 初始化引导） |
+| 过程消息 | concise（只读用户运行时亦强制） |
+| 目录白名单 | 开启（dirs 缺省用默认工作目录） |
+| 引擎加固 | 下一次对话自动完成：挂载 lark-fs MCP、禁原生文件/命令工具、禁子代理、禁 computer-use/browser-use 桌面插件 |
+
+新部署完整流程：安装 → `run`/`start` 初始化绑定应用 → `profile secure <name>` →
+飞书发 `/grant me full`（如需自己提权，先在控制台把权限上限调到完全）→ 完成。
+撤销某项预设：控制台对应开关单独关闭即可。

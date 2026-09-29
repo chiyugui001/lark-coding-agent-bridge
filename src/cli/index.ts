@@ -15,6 +15,7 @@ import {
   runProfileList,
   runProfileRemove,
   runProfileUse,
+  runProfileSecure,
 } from './commands/profile';
 import {
   runServiceRestart,
@@ -98,6 +99,14 @@ profile
     tenant?: string;
   }) => {
     await runProfileCreate(name, opts);
+  });
+
+profile
+  .command('secure <name>')
+  .description('Apply the one-shot secure preset (read-only + memory + concise + fs whitelist)')
+  .option('--dirs <dirs>', 'comma-separated whitelist directories (default: profile workspace)')
+  .action(async (name: string, opts: { dirs?: string }) => {
+    await runProfileSecure(name, { dirs: opts.dirs?.split(',').map((d) => d.trim()).filter(Boolean) });
   });
 
 profile

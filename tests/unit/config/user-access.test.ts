@@ -86,3 +86,22 @@ describe('normalizePermissions per-user fields', () => {
     expect(permissions.adminAccess).toBeUndefined();
   });
 });
+
+describe('applySecurePreset', () => {
+  it('stamps the full permission scheme', async () => {
+    const { applySecurePreset } = await import('../../../src/config/secure-preset');
+    const { createDefaultProfileConfig } = await import('../../../src/config/profile-schema');
+    const base = createDefaultProfileConfig({
+      agentKind: 'zcode',
+      accounts: { app: { id: 'cli_t', secret: '${APP_SECRET}', tenant: 'feishu' } },
+    });
+    base.workspaces = { default: 'D:/work' };
+    base.permissions = { defaultAccess: 'full', maxAccess: 'full' };
+    const out = applySecurePreset(base);
+    expect(out.permissions.defaultAccess).toBe('read-only');
+    expect(out.permissions.maxAccess).toBe('read-only');
+    expect(out.memory.enabled).toBe(true);
+    expect(out.preferences.cotMessages).toBe('concise');
+    expect(out.fsWhitelist).toEqual({ enabled: true, dirs: ['D:/work'] });
+  });
+});

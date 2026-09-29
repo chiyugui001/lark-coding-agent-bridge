@@ -86,6 +86,27 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
     changed = true;
   }
 
+  // Desktop-control plugins are another bypass surface (screenshots, mouse/
+  // keyboard); deny them while the whitelist is on. Left untouched when off.
+  const plugins = (raw.plugins ?? {}) as { enabledPlugins?: Record<string, boolean> };
+  const enabledPlugins = plugins.enabledPlugins ?? {};
+  const DESKTOP_PLUGINS = [
+    'computer-use@zcode-plugins-official',
+    'browser-use@zcode-plugins-official',
+  ];
+  if (sandbox?.enabled) {
+    for (const key of DESKTOP_PLUGINS) {
+      if (enabledPlugins[key] !== false) {
+        enabledPlugins[key] = false;
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    plugins.enabledPlugins = enabledPlugins;
+    raw.plugins = plugins;
+  }
+
   const permission = (raw.permission ?? {}) as { disallowedTools?: string[] };
   const current = permission.disallowedTools ?? [];
   const ours = new Set<string>(NATIVE_TOOLS);

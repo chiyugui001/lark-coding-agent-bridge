@@ -17,6 +17,7 @@ import {
 } from '../../config/profile-store';
 import type { RootConfig } from '../../config/profile-schema';
 import { resolveAppSecret } from '../../config/secret-resolver';
+import { applySecurePreset } from '../../config/secure-preset';
 import { writeFileAtomic } from '../../platform/atomic-write';
 import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
 import { readAndPrune } from '../../runtime/registry';
@@ -273,4 +274,38 @@ export async function runProfileExport(
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export interface ProfileSecureOptions extends ProfileCommandOptions {
+  /** Whitelist dirs; defaults to the profile's workspace. */
+  dirs?: string[];
+}
+
+/**
+ * One-shot secure deployment preset: read-only defaults, per-user memory,
+ * concise process messages, filesystem whitelist (see docs/permissions.md).
+ */
+export async function runProfileSecure(
+  name: string,
+  opts: ProfileSecureOptions = {},
+): Promise<void> {
+  const rootDir = opts.rootDir ?? paths.rootDir;
+  const configFile = resolveAppPaths({ rootDir }).configFile;
+  await withConfigFileLock(configFile, async () => {
+    const root = await loadRootConfig(configFile);
+    const profile = root?.profiles[name];
+    if (!profile) throw new Error(`profile not found: ${name}`);
+    root.profiles[name] = applySecurePreset(profile, { dirs: opts.dirs });
+    await saveRootConfig(root, configFile);
+  });
+  console.log([
+    `✓ 已对 profile「${name}」应用安全预设：`,
+    '  - 默认/上限权限：只读（提权用 /grant <open_id|me> full，需先调高上限）',
+    '  - 每用户记忆：开启（memory_write 协议 + 初始化引导）',
+    '  - 过程消息：精简（concise）',
+    '  - 目录白名单：开启' + (opts.dirs?.length ? `（${opts.dirs.join('; ')}）` : '（默认工作目录）'),
+    '',
+    '引擎加固（MCP 挂载/原生工具与子代理禁用/桌面插件禁用）将在下一次对话时自动完成。',
+    '若该 profile 正在运行，重启后生效。',
+  ].join('\n'));
 }
