@@ -168,3 +168,21 @@ lark-channel-bridge profile secure <name> [--dirs "D:/path1,D:/path2"]
 新部署完整流程：安装 → `run`/`start` 初始化绑定应用 → `profile secure <name>` →
 飞书发 `/grant me full`（如需自己提权，先在控制台把权限上限调到完全）→ 完成。
 撤销某项预设：控制台对应开关单独关闭即可。
+
+## 九、白名单模式下的效率：graphify 图谱 MCP（lark-graph）
+
+白名单禁用 Bash 后，agent 一度退化为逐文件翻源码（同类问题实测 31 次工具调用 / 3 分 10 秒）。
+桥接因此内置 graphify-router（`dist/graphify-router.js`，零依赖 stdio MCP）：
+
+- 启动时扫描白名单目录（二级深度），索引全部 `graphify-out/graph.json`（sensor 工作区实测 102 个项目）；
+- 暴露 `graph_list_projects / graph_query / graph_path / graph_explain` 四个工具，
+  内部按 `project` 参数路由到 graphify CLI——一个进程覆盖整个工作区
+  （graphify 官方 MCP 一进程只能挂一张图）；
+- 白名单开启时随引擎配置自动挂载；探测到图谱工作区的提示词改为「图谱 MCP 工具优先」。
+
+修复后实测（UC711 周期上报问题）：**8 次工具调用 / 50 秒**，路径为
+graph_list_projects → graph_query → graph_explain ×2 → 按图谱位置精读源码。
+与桌面端直查图谱（单查询 11 秒）的差距缩小到提示词开销量级。
+
+注意：引擎会话在创建时固化工具集——lark-graph 首次挂载或白名单变更后，
+桥接会自动开新会话让工具集生效（见「二、执行权」与白名单章节）。
