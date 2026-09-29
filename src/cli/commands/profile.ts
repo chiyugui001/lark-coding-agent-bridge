@@ -311,27 +311,34 @@ export async function runProfileSecure(
     '若该 profile 正在运行，重启后生效。',
   ].join('\n'));
 
-  // Graphify guided setup: the lark-graph MCP router needs the CLI. When the
-  // workspace has graphs but the CLI is missing, offer a one-shot install.
+  // Graphify guided setup: always report the detection result so deployers
+  // know whether graph-accelerated queries are active, and offer a one-shot
+  // install whenever either piece is missing (no graphs OR no CLI).
   const rootAfter = await loadRootConfig(configFile);
   const wsRoot = opts.dirs?.[0] ?? rootAfter?.profiles[name]?.workspaces.default;
-  if (await workspaceHasGraphs(wsRoot)) {
-    if (await detectGraphify()) {
-      console.log('✓ 检测到 graphify CLI 与工作区图谱——lark-graph 图谱查询 MCP 将在首次对话时自动挂载。');
-    } else {
-      console.log('⚠ 工作区存在 graphify 图谱，但本机未安装 graphify CLI（图谱查询 MCP 将跳过，agent 退回读源码）。');
-      const answer = await ask('   是否现在自动安装（uv tool install graphifyy）？[y/N] ');
-      if (answer.trim().toLowerCase().startsWith('y')) {
-        console.log('   安装中…（约 1-2 分钟）');
-        if (await installGraphify()) {
-          console.log('✓ graphify 安装完成，lark-graph 将在首次对话时自动挂载。');
-        } else {
-          console.error('✗ 安装失败（缺 uv 或网络问题）。可手动执行: uv tool install graphifyy');
-        }
+  const [hasGraphs, hasCli] = [await workspaceHasGraphs(wsRoot), await detectGraphify()];
+
+  if (hasGraphs && hasCli) {
+    console.log('✓ 检测到 graphify CLI 与工作区图谱——lark-graph 图谱查询 MCP 将在首次对话时自动挂载。');
+  } else if (hasGraphs && !hasCli) {
+    console.log('⚠ 工作区存在 graphify 图谱，但本机未安装 graphify CLI（图谱查询 MCP 将跳过，agent 退回读源码）。');
+    const answer = await ask('   是否现在自动安装（uv tool install graphifyy）？[y/N] ');
+    if (answer.trim().toLowerCase().startsWith('y')) {
+      console.log('   安装中…（约 1-2 分钟）');
+      if (await installGraphify()) {
+        console.log('✓ graphify 安装完成，lark-graph 将在首次对话时自动挂载。');
       } else {
-        console.log('   已跳过。后续可随时运行: uv tool install graphifyy');
+        console.error('✗ 安装失败（缺 uv 或网络问题）。可手动执行: uv tool install graphifyy');
       }
+    } else {
+      console.log('   已跳过。后续可随时运行: uv tool install graphifyy');
     }
+  } else if (!hasGraphs && hasCli) {
+    console.log('ℹ 本机已安装 graphify CLI，但工作区未检测到图谱（graphify-out/）——lark-graph 暂不挂载。');
+    console.log('   工作区构建图谱后（各项目内运行 graphify extract），下次对话自动挂载。');
+  } else {
+    console.log('ℹ 未检测到 graphify 图谱与 CLI——lark-graph 图谱查询 MCP 不挂载（agent 直接读源码，功能不受影响）。');
+    console.log('   如需图谱加速：工作区构建图谱（graphify extract）+ 安装 CLI（uv tool install graphifyy）。');
   }
 }
 
