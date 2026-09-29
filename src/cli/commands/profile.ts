@@ -18,6 +18,8 @@ import {
 import type { RootConfig } from '../../config/profile-schema';
 import { resolveAppSecret } from '../../config/secret-resolver';
 import { applySecurePreset } from '../../config/secure-preset';
+import { detectGraphify, installGraphify, workspaceHasGraphs } from '../../agent/graphify-env';
+import { createInterface } from 'node:readline';
 import { writeFileAtomic } from '../../platform/atomic-write';
 import { acquireProfileRuntimeLock, checkRuntimeLock } from '../../runtime/locks';
 import { readAndPrune } from '../../runtime/registry';
@@ -308,4 +310,32 @@ export async function runProfileSecure(
     '引擎加固（MCP 挂载/原生工具与子代理禁用/桌面插件禁用）将在下一次对话时自动完成。',
     '若该 profile 正在运行，重启后生效。',
   ].join('\n'));
+
+  // Graphify guided setup: the lark-graph MCP router needs the CLI. When the
+  // workspace has graphs but the CLI is missing, offer a one-shot install.
+  const rootAfter = await loadRootConfig(configFile);
+  const wsRoot = opts.dirs?.[0] ?? rootAfter?.profiles[name]?.workspaces.default;
+  if (await workspaceHasGraphs(wsRoot)) {
+    if (await detectGraphify()) {
+      console.log('✓ 检测到 graphify CLI 与工作区图谱——lark-graph 图谱查询 MCP 将在首次对话时自动挂载。');
+    } else {
+      console.log('⚠ 工作区存在 graphify 图谱，但本机未安装 graphify CLI（图谱查询 MCP 将跳过，agent 退回读源码）。');
+      const answer = await ask('   是否现在自动安装（uv tool install graphifyy）？[y/N] ');
+      if (answer.trim().toLowerCase().startsWith('y')) {
+        console.log('   安装中…（约 1-2 分钟）');
+        if (await installGraphify()) {
+          console.log('✓ graphify 安装完成，lark-graph 将在首次对话时自动挂载。');
+        } else {
+          console.error('✗ 安装失败（缺 uv 或网络问题）。可手动执行: uv tool install graphifyy');
+        }
+      } else {
+        console.log('   已跳过。后续可随时运行: uv tool install graphifyy');
+      }
+    }
+  }
+}
+
+function ask(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a); }));
 }
