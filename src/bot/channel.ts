@@ -936,7 +936,8 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           '1) 用户写了具体版本/tag——先 git_tags 确认 ref 存在再查该版本；' +
           '2) 用户没写版本——默认当前分支并注明；' +
           '3) **版本模糊/有歧义时（如"上一个版本"、"去年那个版本"、只写了部分版本号且 git_tags 有多个匹配）——不要猜，先用 git_tags 列出候选，向用户确认具体是哪个 tag 后再查询**；' +
-          '4) 回答注明所基于的版本号。',
+          '4) 读历史版本文件时**先 git_grep 定位行号，再 git_read_file 用 head/tail 只读相关段落**，不要整读大文件；' +
+          '5) 回答注明所基于的版本号。',
         ]
       : undefined;
   const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? []), ...(gitVersionHint ?? [])];

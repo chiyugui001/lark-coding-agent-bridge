@@ -123,13 +123,15 @@ async function main(): Promise<void> {
     },
     {
       name: 'git_read_file',
-      description: 'Read one file at a specific version (tag/branch/commit). Use for version-specific questions.',
+      description: 'Read one file at a specific version (tag/branch/commit). Prefer git_grep first to locate the line, then use head/tail here to read only the relevant section instead of the whole file.',
       inputSchema: {
         type: 'object',
         properties: {
           project: { type: 'string' },
           ref: { type: 'string', description: 'tag, branch, or commit hash' },
           path: { type: 'string', description: 'repo-relative file path' },
+          head: { type: 'number', description: 'only first N lines (optional)' },
+          tail: { type: 'number', description: 'only last N lines (optional)' },
         },
         required: ['project', 'ref', 'path'],
         additionalProperties: false,
@@ -220,7 +222,15 @@ async function main(): Promise<void> {
         if (!ref) return `invalid ref "${args.ref}" (tag/branch/commit only)`;
         const path = String(args.path ?? '').trim();
         if (!path || path.startsWith('-')) return `invalid path "${args.path}"`;
-        return runGit(r.repoPath, ['show', `${ref}:${path}`]);
+        const raw = await runGit(r.repoPath, ['show', `${ref}:${path}`]);
+        const NL = String.fromCharCode(10);
+        const lines = raw.split(NL);
+        const head = typeof args.head === 'number' && args.head > 0 ? Math.floor(args.head) : 0;
+        const tail = typeof args.tail === 'number' && args.tail > 0 ? Math.floor(args.tail) : 0;
+        if (head && !tail) return lines.slice(0, head).join(NL);
+        if (tail && !head) return lines.slice(-tail).join(NL);
+        if (head && tail) return lines.slice(0, head + tail).join(NL);
+        return raw;
       }
       case 'git_log': {
         const r = findRepo(String(args.project ?? ''));
