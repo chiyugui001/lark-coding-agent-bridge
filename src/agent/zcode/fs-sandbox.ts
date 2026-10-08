@@ -101,6 +101,32 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
     delete servers['lark-graph'];
     changed = true;
   }
+
+  // Git version router MCP: read-only tag/branch/commit queries (show/log/
+  // tag/diff/grep) so version-specific questions work without Bash.
+  let gitRouterPath: string | undefined;
+  for (let dir = dirname(fileURLToPath(import.meta.url)); dir && dir !== dirname(dir); dir = dirname(dir)) {
+    const candidate = join(dir, 'git-version-router.js');
+    if (existsSync(candidate)) {
+      gitRouterPath = candidate;
+      break;
+    }
+  }
+  if (sandbox?.enabled && wlDirs.length > 0 && gitRouterPath) {
+    const desiredGit = {
+      type: 'stdio',
+      command: process.execPath,
+      args: [gitRouterPath, ...wlDirs],
+      enabled: true,
+    };
+    if (JSON.stringify(servers['lark-git']) !== JSON.stringify(desiredGit)) {
+      servers['lark-git'] = desiredGit;
+      changed = true;
+    }
+  } else if ('lark-git' in servers) {
+    delete servers['lark-git'];
+    changed = true;
+  }
   if (changed) {
     mcp.servers = servers;
     raw.mcp = mcp;

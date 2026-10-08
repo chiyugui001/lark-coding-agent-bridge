@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
-    entry: { cli: 'src/cli/index.ts', 'graphify-router': 'src/agent/graphify-router.ts' },
+    entry: { cli: 'src/cli/index.ts', 'graphify-router': 'src/agent/graphify-router.ts', 'git-version-router': 'src/agent/git-version-router.ts' },
     outDir: 'dist',
     format: ['esm'],
     target: 'node20',

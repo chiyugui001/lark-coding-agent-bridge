@@ -927,7 +927,15 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           '【知识图谱检索】本工作区存在 graphify 知识图谱，且已挂载图谱查询 MCP 工具（graph_list_projects / graph_query / graph_path / graph_explain）。回答代码相关问题时**优先用这些 MCP 图谱工具**：先 graph_list_projects 找到目标项目 id，再用 graph_query（自然语言问题）或 graph_path（两符号间调用路径）/graph_explain（单符号解释）查询；结果自带源码位置，需要细节时按位置精读源码片段。只有图谱工具不可用或无结果时才回退读源码，不要直接通读大文件，也不要手动读 graph.json 原文（体积大，用查询工具）。',
         ]
       : undefined;
-  const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? [])];
+  // Version-aware guidance: with the whitelist on and git repos present, the
+  // read-only git version MCP is mounted — teach the agent the flow.
+  const gitVersionHint =
+    controls.profileConfig.fsWhitelist?.enabled && (await detectGitRepos(workspaces, controls, scope))
+      ? [
+          '【版本查询】工作区各项目带 git 历史，已挂载只读版本查询工具（git_list_projects / git_tags / git_read_file / git_log / git_diff / git_grep）。用户问题提到具体版本/tag/release 时：先 git_tags 确认 ref 存在，再 git_read_file / git_grep 读该版本内容或 git_diff 对比两版本；回答注明所基于的版本号。用户没写版本时默认当前分支并注明。',
+        ]
+      : undefined;
+  const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? []), ...(gitVersionHint ?? [])];
 
   const userMemory = await loadUserMemory(controls, batch[0]?.senderId ?? '');
 
@@ -2183,4 +2191,30 @@ async function scanForGraphifyOut(dir: string, depth: number): Promise<boolean> 
     }
   }
   return false;
+}
+
+/** True when the workspace tree (two levels) contains at least one git repo. */
+async function detectGitRepos(workspaces: WorkspaceStore, controls: Controls, scope: string): Promise<boolean> {
+  try {
+    const root = workspaces.cwdFor(scope) ?? controls.profileConfig.workspaces.default;
+    if (!root) return false;
+    const entries = await readdir(root, { withFileTypes: true });
+    const subdirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
+    const hasGit = async (dir: string) => { try { await access(join(dir, '.git')); return true; } catch { return false; } };
+    if (await hasGit(root)) return true;
+    for (const name of subdirs) {
+      if (name === 'node_modules') continue;
+      if (await hasGit(join(root, name))) return true;
+      try {
+        const inner = await readdir(join(root, name), { withFileTypes: true });
+        for (const c of inner) {
+          if (!c.isDirectory() || c.name.startsWith('.')) continue;
+          if (await hasGit(join(root, name, c.name))) return true;
+        }
+      } catch { /* skip */ }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
