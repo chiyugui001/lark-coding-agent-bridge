@@ -31,6 +31,8 @@ import {
 import { renderText } from '../card/text-renderer';
 import { tryHandleCommand, type Controls } from '../commands';
 import { MemoryStore } from './memory-store';
+import { getUserRole } from './feishu-contact';
+import { SUPPORT_MODE_PROMPT, filterSupportOutput } from './support-filter';
 import { resolveUserAccessMode } from '../config/permissions';
 import { resolveAppPaths } from '../config/app-paths';
 import type { AppConfig } from '../config/schema';
@@ -833,6 +835,29 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const chatId = firstMsg.chatId;
   const threadId = firstMsg.threadId;
 
+  // Resolve the sender's effective permission + response mode early (before
+  // prompt building) so the support-mode prompt and output filter can apply.
+  let userRole: string | undefined;
+  if (controls.profileConfig.rolePermissions) {
+    const feishuRole = await getUserRole(channel, firstMsg.senderId);
+    if (feishuRole) {
+      userRole = [...feishuRole.departmentNames, feishuRole.jobTitle]
+        .filter(Boolean)
+        .join(';');
+    }
+  }
+  const earlyAccess = resolveUserAccessMode({
+    permissions: controls.profileConfig.permissions,
+    admins: controls.profileConfig.access.admins,
+    senderId: firstMsg.senderId,
+    isOwner: controls.botOwnerId === firstMsg.senderId,
+    ...(userRole ? { userRole } : {}),
+    ...(controls.profileConfig.rolePermissions
+      ? { rolePermissions: controls.profileConfig.rolePermissions }
+      : {}),
+  });
+  const isSupportMode = earlyAccess.responseMode === 'support';
+
   const resourceItems = batch.flatMap((m) =>
     m.resources.map((r) => ({ messageId: m.messageId, resource: r })),
   );
@@ -941,7 +966,12 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
           '5) 回答注明所基于的版本号。',
         ]
       : undefined;
-  const instructions = [...(extraInstructions ?? []), ...(graphifyHint ?? []), ...(gitVersionHint ?? [])];
+  const instructions = [
+    ...(extraInstructions ?? []),
+    ...(graphifyHint ?? []),
+    ...(gitVersionHint ?? []),
+    ...(isSupportMode ? [SUPPORT_MODE_PROMPT] : []),
+  ];
 
   const userMemory = await loadUserMemory(controls, batch[0]?.senderId ?? '');
 
@@ -1083,14 +1113,9 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
   const replyMode = getMessageReplyMode(controls.cfg);
   log.info('flush', 'reply-mode', { mode: replyMode });
   const configuredCotMessages = getCotMessages(controls.cfg);
-  // Read-only users must not see process content (reasoning text, working
-  // text, tool details) — force the minimal phase-only process message.
-  const senderAccess = resolveUserAccessMode({
-    permissions: controls.profileConfig.permissions,
-    admins: controls.profileConfig.access.admins,
-    senderId: firstMsg.senderId,
-    isOwner: controls.botOwnerId === firstMsg.senderId,
-  });
+  // Access/responseMode was resolved early in runAgentBatch (before prompt
+  // building) — reuse that result here for COT level determination.
+  const senderAccess = earlyAccess;
   const cotMessages =
     configuredCotMessages !== 'off' && senderAccess.mode === 'read-only'
       ? ('concise' as const)
@@ -1165,6 +1190,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
     memory: memoryWriteContext,
+    supportMode: isSupportMode,
           channel,
           chatId,
           scope,
@@ -1241,6 +1267,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
     memory: memoryWriteContext,
+    supportMode: isSupportMode,
           channel,
           chatId,
           scope,
@@ -1306,6 +1333,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
         await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
     memory: memoryWriteContext,
+    supportMode: isSupportMode,
           channel,
           chatId,
           scope,
@@ -1330,6 +1358,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       await sendFinalReply({
     elapsedMs: Date.now() - runStartedAt,
     memory: memoryWriteContext,
+    supportMode: isSupportMode,
         channel,
         chatId,
         scope,
@@ -1558,6 +1587,23 @@ async function buildMemoryWriteContext(
   }
 }
 
+/** Filter technical details from all text blocks + finalText (support mode). */
+function filterSupportModeState(state: RunState): RunState {
+  const blocks = state.blocks.map((b) => {
+    if (b.kind !== 'text' || !b.content) return b;
+    const { filtered, hits } = filterSupportOutput(b.content);
+    if (hits > 0) {
+      log.info('outbound', 'support-filter', { hits, scope: 'reply' });
+    }
+    return { ...b, content: filtered };
+  });
+  const finalText =
+    state.finalText !== undefined && state.finalText
+      ? filterSupportOutput(state.finalText).filtered
+      : state.finalText;
+  return { ...state, blocks, ...(finalText !== undefined ? { finalText } : {}) };
+}
+
 /** Prepend the elapsed-time line to the reply text (first line, all modes). */
 function withDurationLine(state: RunState, elapsedMs: number | undefined): RunState {
   if (elapsedMs === undefined) return state;
@@ -1587,10 +1633,15 @@ async function sendFinalReply(input: {
   /** When set, <memory_write> blocks in the reply are persisted to the
    * sender's memory file and stripped from the outgoing text. */
   memory?: { store: MemoryStore; senderId: string };
+  /** Support-mode: filter technical details from the outgoing reply. */
+  supportMode?: boolean;
 }): Promise<void> {
   let state = withDurationLine(input.state, input.elapsedMs);
   if (input.memory) {
     state = drainMemoryWrites(state, input.memory);
+  }
+  if (input.supportMode) {
+    state = filterSupportModeState(state);
   }
   const body = renderText(state);
 

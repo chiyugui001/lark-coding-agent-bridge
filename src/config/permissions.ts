@@ -1,6 +1,13 @@
 export type AccessMode = 'read-only' | 'workspace' | 'full';
+export type ResponseMode = 'technical' | 'support';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+
+export interface RolePermissionEntry {
+  access: AccessMode;
+  /** `technical` = full code detail; `support` = conclusion-only, no code/paths/symbols. */
+  responseMode: ResponseMode;
+}
 
 export interface PermissionConfig {
   defaultAccess: AccessMode;
@@ -222,33 +229,61 @@ function readAccessWithin(
   return value;
 }
 
-export type UserAccessSource = 'userAccess' | 'owner' | 'adminAccess' | 'default';
+export type UserAccessSource = 'userAccess' | 'owner' | 'adminAccess' | 'default' | 'role';
 
 export interface ResolvedUserAccess {
   mode: AccessMode;
   source: UserAccessSource;
+  /** Response presentation mode; `support` strips code/paths/symbols from output. */
+  responseMode?: ResponseMode;
 }
 
 /**
  * Resolve the effective agent access mode for one sender. Priority:
- * explicit userAccess entry > owner (profile maxAccess) > adminAccess for
- * access.admins members > defaultAccess. The result still needs the usual
- * capability clamp at policy evaluation.
+ * explicit userAccess entry > rolePermissions match > owner (profile
+ * maxAccess) > adminAccess for access.admins members > defaultAccess.
+ * The result still needs the usual capability clamp at policy evaluation.
  */
 export function resolveUserAccessMode(input: {
   permissions: Pick<PermissionConfig, 'defaultAccess' | 'maxAccess' | 'userAccess' | 'adminAccess'>;
   admins: readonly string[];
   senderId: string;
   isOwner: boolean;
+  /** Feishu department name or job title, for rolePermissions matching. */
+  userRole?: string;
+  /** Role mapping from profile config. */
+  rolePermissions?: Record<string, RolePermissionEntry>;
 }): ResolvedUserAccess {
   const explicit = input.permissions.userAccess?.[input.senderId];
   if (explicit) return { mode: explicit, source: 'userAccess' };
+  if (input.userRole && input.rolePermissions) {
+    const match = findRoleMatch(input.userRole, input.rolePermissions);
+    if (match) {
+      const entry = input.rolePermissions[match];
+      if (!entry) return { mode: input.permissions.defaultAccess, source: 'default' };
+      return { mode: entry.access, source: 'role', responseMode: entry.responseMode };
+    }
+  }
   if (input.isOwner) return { mode: input.permissions.maxAccess, source: 'owner' };
   if (input.admins.includes(input.senderId)) {
     const adminMode = input.permissions.adminAccess ?? input.permissions.defaultAccess;
     return { mode: adminMode, source: input.permissions.adminAccess ? 'adminAccess' : 'default' };
   }
   return { mode: input.permissions.defaultAccess, source: 'default' };
+}
+
+/** Find the first rolePermissions key that matches the user's role string. */
+function findRoleMatch(
+  userRole: string,
+  rolePermissions: Record<string, RolePermissionEntry>,
+): string | undefined {
+  const lower = userRole.toLowerCase();
+  // Exact match first, then substring match (department names often
+  // contain the role keyword, e.g. "固件开发部" matches "固件开发").
+  const keys = Object.keys(rolePermissions);
+  const exact = keys.find((k) => k.toLowerCase() === lower);
+  if (exact) return exact;
+  return keys.find((k) => lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower));
 }
 
 function defaultPermissions(): PermissionConfig {

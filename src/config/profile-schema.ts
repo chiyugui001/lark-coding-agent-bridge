@@ -5,6 +5,7 @@ import type {
   SecretsConfig,
 } from './schema';
 import {
+  type RolePermissionEntry,
   normalizePermissions,
   permissionsToLegacySandbox,
   type AccessMode,
@@ -186,6 +187,14 @@ export interface ProfileConfig {
    */
   fsWhitelist?: { enabled: boolean; dirs?: string[] };
   /**
+   * Role-based permission mapping keyed by Feishu department name or job
+   * title. When a user sends a message, the bridge looks up their
+   * department/title via the Feishu Contact API and matches it against
+   * these patterns to resolve access + responseMode automatically.
+   * Per-person userAccess always wins over role mapping.
+   */
+  rolePermissions?: Record<string, RolePermissionEntry>;
+  /**
    * Session continuity scope for group chats. `chat` (default) keeps one
    * agent session per chat; `chat+user` keys sessions by chat AND sender,
    * so each member carries their own conversation context. Private chats
@@ -275,6 +284,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     zcode?: ZcodeConfig;
     memory?: Partial<MemoryConfig>;
     fsWhitelist?: { enabled?: boolean; dirs?: unknown };
+    rolePermissions?: Record<string, { access?: unknown; responseMode?: unknown }>;
     sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
@@ -338,6 +348,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
         ? { injectMaxBytes: raw.memory.injectMaxBytes }
         : {}),
     },
+    ...(normalizeRolePermissions(raw.rolePermissions) ? { rolePermissions: normalizeRolePermissions(raw.rolePermissions) } : {}),
     sessionScope: raw.sessionScope === 'chat+user' ? 'chat+user' : 'chat',
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
@@ -567,4 +578,23 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? value
     : fallback;
+}
+
+function normalizeRolePermissions(
+  input: unknown,
+): Record<string, RolePermissionEntry> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const out: Record<string, import('./permissions').RolePermissionEntry> = {};
+  for (const [key, val] of Object.entries(input as Record<string, unknown>)) {
+    if (!key.trim() || !val || typeof val !== 'object') continue;
+    const v = val as { access?: unknown; responseMode?: unknown };
+    const access =
+      v.access === 'read-only' || v.access === 'workspace' || v.access === 'full'
+        ? v.access
+        : undefined;
+    const responseMode = v.responseMode === 'support' ? 'support' : 'technical';
+    if (!access) continue;
+    out[key] = { access, responseMode };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
