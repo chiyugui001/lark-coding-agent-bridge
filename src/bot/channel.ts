@@ -852,6 +852,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     senderId: firstMsg.senderId,
     isOwner: controls.botOwnerId === firstMsg.senderId,
     ...(userDepartments ? { userDepartments } : {}),
+    ...(firstMsg.senderName ? { userName: firstMsg.senderName } : {}),
     ...(userJobTitle ? { userJobTitle } : {}),
     ...(controls.profileConfig.rolePermissions
       ? { rolePermissions: controls.profileConfig.rolePermissions }

@@ -4,6 +4,8 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
 export interface RolePermissionEntry {
+  /** Exact or substring match against sender's display name (optional). */
+  name?: string;
   /** Substring to match against department names (optional). */
   department?: string;
   /** Substring to match against job title (optional). */
@@ -253,6 +255,8 @@ export function resolveUserAccessMode(input: {
   admins: readonly string[];
   senderId: string;
   isOwner: boolean;
+  /** Sender's display name from the Feishu message envelope (no API needed). */
+  userName?: string;
   /** User's department names from Feishu Contact API. */
   userDepartments?: string[];
   /** User's job title from Feishu Contact API. */
@@ -270,7 +274,7 @@ export function resolveUserAccessMode(input: {
   // that field alone. First matching rule wins.
   if (input.rolePermissions && input.rolePermissions.length > 0) {
     const match = input.rolePermissions.find((rule) =>
-      matchesRoleRule(rule, input.userDepartments ?? [], input.userJobTitle ?? ''),
+      matchesRoleRule(rule, input.userDepartments ?? [], input.userJobTitle ?? '', input.userName ?? ''),
     );
     if (match) {
       return { mode: match.access, source: 'role', responseMode: match.responseMode };
@@ -294,15 +298,21 @@ export function resolveUserAccessMode(input: {
 }
 
 /**
- * Check if a single role rule matches the user. Each specified field is a
- * substring test; when both department and jobTitle are specified, both
- * must match (AND). Unspecified fields are wildcards.
+ * Check if a single role rule matches the user. `name` matches against the
+ * sender's display name from the Feishu message (no API call needed).
+ * `department` and `jobTitle` match against Feishu Contact API results.
+ * All specified fields must match (AND). Unspecified fields are wildcards.
  */
 function matchesRoleRule(
   rule: RolePermissionEntry,
   departments: string[],
   jobTitle: string,
+  senderName: string,
 ): boolean {
+  if (rule.name && rule.name.trim()) {
+    const pat = rule.name.trim().toLowerCase();
+    if (!senderName.toLowerCase().includes(pat)) return false;
+  }
   if (rule.department && rule.department.trim()) {
     const pat = rule.department.trim().toLowerCase();
     if (!departments.some((d) => d.toLowerCase().includes(pat))) return false;

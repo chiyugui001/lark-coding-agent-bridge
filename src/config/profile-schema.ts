@@ -287,7 +287,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     zcode?: ZcodeConfig;
     memory?: Partial<MemoryConfig>;
     fsWhitelist?: { enabled?: boolean; dirs?: unknown };
-    rolePermissions?: Array<{ department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown }>;
+    rolePermissions?: Array<{ name?: unknown; department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown }>;
     defaultResponseMode?: 'technical' | 'support';
     sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
@@ -592,16 +592,17 @@ function normalizeRolePermissions(
   const out: RolePermissionEntry[] = [];
   for (const item of input) {
     if (!item || typeof item !== 'object') continue;
-    const v = item as { department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown };
+    const v = item as { name?: unknown; department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown };
     const access =
       v.access === 'read-only' || v.access === 'workspace' || v.access === 'full'
         ? v.access
         : undefined;
     if (!access) continue;
     const responseMode = v.responseMode === 'support' ? 'support' as const : 'technical' as const;
+    const name = typeof v.name === 'string' && v.name.trim() ? v.name.trim() : undefined;
     const department = typeof v.department === 'string' && v.department.trim() ? v.department.trim() : undefined;
     const jobTitle = typeof v.jobTitle === 'string' && v.jobTitle.trim() ? v.jobTitle.trim() : undefined;
-    if (!department && !jobTitle) continue;
+    if (!name && !department && !jobTitle) continue;
     out.push({
       ...(department ? { department } : {}),
       ...(jobTitle ? { jobTitle } : {}),
