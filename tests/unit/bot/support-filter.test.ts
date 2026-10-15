@@ -36,20 +36,22 @@ describe('filterSupportOutput', () => {
   });
 });
 
-describe('resolveUserAccessMode with rolePermissions', () => {
+describe('resolveUserAccessMode with rolePermissions (structured array)', () => {
   const basePerms = { defaultAccess: 'read-only' as const, maxAccess: 'full' as const };
-  const rolePerms = {
-    '固件开发': { access: 'full' as const, responseMode: 'technical' as const },
-    '售前': { access: 'read-only' as const, responseMode: 'support' as const },
-  };
+  const rolePerms = [
+    { department: '研发二部', jobTitle: '单片机开发', access: 'full' as const, responseMode: 'technical' as const },
+    { department: '研发二部', jobTitle: '测试', access: 'read-only' as const, responseMode: 'technical' as const },
+    { jobTitle: '售前', access: 'read-only' as const, responseMode: 'support' as const },
+  ];
 
-  it('matches role by substring (department name)', () => {
+  it('matches when both department AND jobTitle match', () => {
     const result = resolveUserAccessMode({
       permissions: basePerms,
       admins: [],
       senderId: 'ou_x',
       isOwner: false,
-      userRole: '固件开发部',
+      userDepartments: ['研发二部'],
+      userJobTitle: '高级单片机开发工程师',
       rolePermissions: rolePerms,
     });
     expect(result.source).toBe('role');
@@ -57,17 +59,59 @@ describe('resolveUserAccessMode with rolePermissions', () => {
     expect(result.responseMode).toBe('technical');
   });
 
-  it('matches support role and sets responseMode', () => {
+  it('does NOT match when department matches but jobTitle does not', () => {
     const result = resolveUserAccessMode({
       permissions: basePerms,
       admins: [],
       senderId: 'ou_y',
       isOwner: false,
-      userRole: '售前部',
+      userDepartments: ['研发二部'],
+      userJobTitle: '行政专员',
+      rolePermissions: rolePerms,
+    });
+    expect(result.source).toBe('default');
+    expect(result.responseMode).toBeUndefined();
+  });
+
+  it('does NOT match when jobTitle matches but department does not', () => {
+    const result = resolveUserAccessMode({
+      permissions: basePerms,
+      admins: [],
+      senderId: 'ou_y2',
+      isOwner: false,
+      userDepartments: ['研发一部'],
+      userJobTitle: '高级单片机开发工程师',
+      rolePermissions: rolePerms,
+    });
+    expect(result.source).toBe('default');
+  });
+
+  it('matches jobTitle-only rule regardless of department', () => {
+    const result = resolveUserAccessMode({
+      permissions: basePerms,
+      admins: [],
+      senderId: 'ou_pre',
+      isOwner: false,
+      userDepartments: ['售后部'],
+      userJobTitle: '售前工程师',
       rolePermissions: rolePerms,
     });
     expect(result.source).toBe('role');
-    expect(result.mode).toBe('read-only');
+    expect(result.responseMode).toBe('support');
+  });
+
+  it('applies defaultResponseMode when no rule matches', () => {
+    const result = resolveUserAccessMode({
+      permissions: basePerms,
+      admins: [],
+      senderId: 'ou_other',
+      isOwner: false,
+      userDepartments: ['企管科'],
+      userJobTitle: '行政',
+      rolePermissions: rolePerms,
+      defaultResponseMode: 'support',
+    });
+    expect(result.source).toBe('default');
     expect(result.responseMode).toBe('support');
   });
 
@@ -77,25 +121,12 @@ describe('resolveUserAccessMode with rolePermissions', () => {
       admins: [],
       senderId: 'ou_z',
       isOwner: false,
-      userRole: '售前部',
+      userDepartments: ['研发二部'],
+      userJobTitle: '高级单片机开发工程师',
       rolePermissions: rolePerms,
     });
     expect(result.source).toBe('userAccess');
     expect(result.mode).toBe('workspace');
-  });
-
-  it('falls back to default when role does not match', () => {
-    const result = resolveUserAccessMode({
-      permissions: basePerms,
-      admins: [],
-      senderId: 'ou_w',
-      isOwner: false,
-      userRole: '行政部门',
-      rolePermissions: rolePerms,
-    });
-    expect(result.source).toBe('default');
-    expect(result.mode).toBe('read-only');
-    expect(result.responseMode).toBeUndefined();
   });
 
   it('no rolePermissions provided falls through normally', () => {

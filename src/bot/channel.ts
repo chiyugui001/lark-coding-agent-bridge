@@ -837,13 +837,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   // Resolve the sender's effective permission + response mode early (before
   // prompt building) so the support-mode prompt and output filter can apply.
-  let userRole: string | undefined;
+  let userDepartments: string[] | undefined;
+  let userJobTitle: string | undefined;
   if (controls.profileConfig.rolePermissions) {
     const feishuRole = await getUserRole(channel, firstMsg.senderId);
     if (feishuRole) {
-      userRole = [...feishuRole.departmentNames, feishuRole.jobTitle]
-        .filter(Boolean)
-        .join(';');
+      userDepartments = feishuRole.departmentNames;
+      userJobTitle = feishuRole.jobTitle;
     }
   }
   const earlyAccess = resolveUserAccessMode({
@@ -851,9 +851,13 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     admins: controls.profileConfig.access.admins,
     senderId: firstMsg.senderId,
     isOwner: controls.botOwnerId === firstMsg.senderId,
-    ...(userRole ? { userRole } : {}),
+    ...(userDepartments ? { userDepartments } : {}),
+    ...(userJobTitle ? { userJobTitle } : {}),
     ...(controls.profileConfig.rolePermissions
       ? { rolePermissions: controls.profileConfig.rolePermissions }
+      : {}),
+    ...(controls.profileConfig.defaultResponseMode
+      ? { defaultResponseMode: controls.profileConfig.defaultResponseMode }
       : {}),
   });
   const isSupportMode = earlyAccess.responseMode === 'support';

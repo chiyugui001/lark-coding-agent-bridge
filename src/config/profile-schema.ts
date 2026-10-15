@@ -6,6 +6,7 @@ import type {
 } from './schema';
 import {
   type RolePermissionEntry,
+  type ResponseMode,
   normalizePermissions,
   permissionsToLegacySandbox,
   type AccessMode,
@@ -193,7 +194,9 @@ export interface ProfileConfig {
    * these patterns to resolve access + responseMode automatically.
    * Per-person userAccess always wins over role mapping.
    */
-  rolePermissions?: Record<string, RolePermissionEntry>;
+  rolePermissions?: RolePermissionEntry[];
+  /** Default responseMode for users who don't match any role rule (default 'technical'). */
+  defaultResponseMode?: ResponseMode;
   /**
    * Session continuity scope for group chats. `chat` (default) keeps one
    * agent session per chat; `chat+user` keys sessions by chat AND sender,
@@ -284,7 +287,8 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     zcode?: ZcodeConfig;
     memory?: Partial<MemoryConfig>;
     fsWhitelist?: { enabled?: boolean; dirs?: unknown };
-    rolePermissions?: Record<string, { access?: unknown; responseMode?: unknown }>;
+    rolePermissions?: Array<{ department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown }>;
+    defaultResponseMode?: 'technical' | 'support';
     sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
@@ -349,6 +353,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
         : {}),
     },
     ...(normalizeRolePermissions(raw.rolePermissions) ? { rolePermissions: normalizeRolePermissions(raw.rolePermissions) } : {}),
+    ...(raw.defaultResponseMode === 'support' ? { defaultResponseMode: 'support' as const } : {}),
     sessionScope: raw.sessionScope === 'chat+user' ? 'chat+user' : 'chat',
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),
@@ -582,19 +587,27 @@ function numberOr(value: unknown, fallback: number): number {
 
 function normalizeRolePermissions(
   input: unknown,
-): Record<string, RolePermissionEntry> | undefined {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
-  const out: Record<string, import('./permissions').RolePermissionEntry> = {};
-  for (const [key, val] of Object.entries(input as Record<string, unknown>)) {
-    if (!key.trim() || !val || typeof val !== 'object') continue;
-    const v = val as { access?: unknown; responseMode?: unknown };
+): RolePermissionEntry[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const out: RolePermissionEntry[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== 'object') continue;
+    const v = item as { department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown };
     const access =
       v.access === 'read-only' || v.access === 'workspace' || v.access === 'full'
         ? v.access
         : undefined;
-    const responseMode = v.responseMode === 'support' ? 'support' : 'technical';
     if (!access) continue;
-    out[key] = { access, responseMode };
+    const responseMode = v.responseMode === 'support' ? 'support' as const : 'technical' as const;
+    const department = typeof v.department === 'string' && v.department.trim() ? v.department.trim() : undefined;
+    const jobTitle = typeof v.jobTitle === 'string' && v.jobTitle.trim() ? v.jobTitle.trim() : undefined;
+    if (!department && !jobTitle) continue;
+    out.push({
+      ...(department ? { department } : {}),
+      ...(jobTitle ? { jobTitle } : {}),
+      access,
+      responseMode,
+    });
   }
-  return Object.keys(out).length > 0 ? out : undefined;
+  return out.length > 0 ? out : undefined;
 }

@@ -60,6 +60,8 @@ type StoredProfileConfig = Pick<
   | 'zcode'
   | 'memory'
   | 'fsWhitelist'
+  | 'rolePermissions'
+  | 'defaultResponseMode'
   | 'sessionScope'
   | 'attachments'
   | 'comments'
@@ -103,6 +105,8 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.zcode ? { zcode: profile.zcode } : {}),
     memory: profile.memory,
     ...(profile.fsWhitelist ? { fsWhitelist: profile.fsWhitelist } : {}),
+    ...(profile.rolePermissions ? { rolePermissions: profile.rolePermissions } : {}),
+    ...(profile.defaultResponseMode ? { defaultResponseMode: profile.defaultResponseMode } : {}),
     sessionScope: profile.sessionScope,
     attachments: profile.attachments,
     comments: {},

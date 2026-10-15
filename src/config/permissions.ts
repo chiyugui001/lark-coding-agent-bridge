@@ -4,6 +4,10 @@ export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-ac
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
 export interface RolePermissionEntry {
+  /** Substring to match against department names (optional). */
+  department?: string;
+  /** Substring to match against job title (optional). */
+  jobTitle?: string;
   access: AccessMode;
   /** `technical` = full code detail; `support` = conclusion-only, no code/paths/symbols. */
   responseMode: ResponseMode;
@@ -249,41 +253,66 @@ export function resolveUserAccessMode(input: {
   admins: readonly string[];
   senderId: string;
   isOwner: boolean;
-  /** Feishu department name or job title, for rolePermissions matching. */
-  userRole?: string;
-  /** Role mapping from profile config. */
-  rolePermissions?: Record<string, RolePermissionEntry>;
+  /** User's department names from Feishu Contact API. */
+  userDepartments?: string[];
+  /** User's job title from Feishu Contact API. */
+  userJobTitle?: string;
+  /** Role mapping rules from profile config (structured array). */
+  rolePermissions?: RolePermissionEntry[];
+  /** Default responseMode for unmatched users (default 'technical'). */
+  defaultResponseMode?: ResponseMode;
 }): ResolvedUserAccess {
   const explicit = input.permissions.userAccess?.[input.senderId];
   if (explicit) return { mode: explicit, source: 'userAccess' };
-  if (input.userRole && input.rolePermissions) {
-    const match = findRoleMatch(input.userRole, input.rolePermissions);
+
+  // Role matching: both department AND jobTitle conditions must hold
+  // (when a rule specifies both); a rule with only one field matches on
+  // that field alone. First matching rule wins.
+  if (input.rolePermissions && input.rolePermissions.length > 0) {
+    const match = input.rolePermissions.find((rule) =>
+      matchesRoleRule(rule, input.userDepartments ?? [], input.userJobTitle ?? ''),
+    );
     if (match) {
-      const entry = input.rolePermissions[match];
-      if (!entry) return { mode: input.permissions.defaultAccess, source: 'default' };
-      return { mode: entry.access, source: 'role', responseMode: entry.responseMode };
+      return { mode: match.access, source: 'role', responseMode: match.responseMode };
     }
   }
+
   if (input.isOwner) return { mode: input.permissions.maxAccess, source: 'owner' };
   if (input.admins.includes(input.senderId)) {
     const adminMode = input.permissions.adminAccess ?? input.permissions.defaultAccess;
-    return { mode: adminMode, source: input.permissions.adminAccess ? 'adminAccess' : 'default' };
+    return {
+      mode: adminMode,
+      source: input.permissions.adminAccess ? 'adminAccess' : 'default',
+      responseMode: input.defaultResponseMode,
+    };
   }
-  return { mode: input.permissions.defaultAccess, source: 'default' };
+  return {
+    mode: input.permissions.defaultAccess,
+    source: 'default',
+    responseMode: input.defaultResponseMode,
+  };
 }
 
-/** Find the first rolePermissions key that matches the user's role string. */
-function findRoleMatch(
-  userRole: string,
-  rolePermissions: Record<string, RolePermissionEntry>,
-): string | undefined {
-  const lower = userRole.toLowerCase();
-  // Exact match first, then substring match (department names often
-  // contain the role keyword, e.g. "固件开发部" matches "固件开发").
-  const keys = Object.keys(rolePermissions);
-  const exact = keys.find((k) => k.toLowerCase() === lower);
-  if (exact) return exact;
-  return keys.find((k) => lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower));
+/**
+ * Check if a single role rule matches the user. Each specified field is a
+ * substring test; when both department and jobTitle are specified, both
+ * must match (AND). Unspecified fields are wildcards.
+ */
+function matchesRoleRule(
+  rule: RolePermissionEntry,
+  departments: string[],
+  jobTitle: string,
+): boolean {
+  if (rule.department && rule.department.trim()) {
+    const pat = rule.department.trim().toLowerCase();
+    if (!departments.some((d) => d.toLowerCase().includes(pat))) return false;
+  }
+  if (rule.jobTitle && rule.jobTitle.trim()) {
+    const pat = rule.jobTitle.trim().toLowerCase();
+    if (!jobTitle.toLowerCase().includes(pat)) return false;
+  }
+  // At least one field must be specified and matched
+  return Boolean(rule.department?.trim() || rule.jobTitle?.trim());
 }
 
 function defaultPermissions(): PermissionConfig {
