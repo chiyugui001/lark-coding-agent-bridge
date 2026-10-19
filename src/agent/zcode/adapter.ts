@@ -346,7 +346,7 @@ export class ZcodeAdapter implements AgentAdapter {
             }
             yield {
               type: 'error',
-              message: `zcode turn ${event.type === 'turn.failed' ? 'failed' : 'cancelled'}: ${failureDetail.slice(0, 300)}`,
+              message: formatAgentError(event.type, failureDetail),
               terminationReason: 'interrupted',
             };
             return;
@@ -647,4 +647,46 @@ function buildZcodePrompt(
       ].join('\n')
     : '';
   return `${prompt}\n\n## bridge_system_prompt\n\n${buildBridgeSystemPrompt(identity)}${planHint}`;
+}
+
+/**
+ * Turn a raw engine error payload (JSON string) into a concise, user-facing
+ * message with friendly hints for common failure modes. Falls back to the
+ * raw detail (truncated) when the payload isn't parseable JSON.
+ */
+function formatAgentError(eventType: string, failureDetail: string): string {
+  const verb = eventType === 'turn.failed' ? '执行失败' : '已中断';
+  let hint = '';
+  let detail = failureDetail.slice(0, 200);
+
+  try {
+    const parsed = JSON.parse(failureDetail) as {
+      error?: {
+        message?: string;
+        code?: string;
+        attribution?: { reason?: string; retryable?: boolean };
+      };
+    };
+    const err = parsed.error ?? {};
+    const reason = err.attribution?.reason ?? '';
+    const msg = err.message ?? '';
+
+    // Friendly hints for common failure modes
+    if (reason === 'rate_limited' || /已达到.*上限|usage.*limit|quota/i.test(msg)) {
+      hint = '（API 额度/频率受限，请稍后重试或检查配额）';
+    } else if (/model.*not.*available|模型已不可用/i.test(msg)) {
+      hint = '（模型不可用，请检查模型配置）';
+    } else if (/timeout|超时/i.test(msg)) {
+      hint = '（执行超时）';
+    } else if (reason === 'auth' || /unauthorized|401|403/i.test(msg)) {
+      hint = '（认证失败，请检查 API Key）';
+    }
+
+    // Prefer the provider's human-readable message over raw JSON
+    if (msg) detail = msg.slice(0, 200);
+  } catch {
+    // Not JSON — use raw detail as-is
+  }
+
+  return hint ? `${verb}：${detail} ${hint}` : `${verb}：${detail}`;
 }
