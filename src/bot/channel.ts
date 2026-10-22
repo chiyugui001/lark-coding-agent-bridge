@@ -976,6 +976,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     ...(graphifyHint ?? []),
     ...(gitVersionHint ?? []),
     ...(isSupportMode ? [SUPPORT_MODE_PROMPT] : []),
+    ...(buildStaleSessionNotice(controls, sessions, scope) ?? []),
   ];
 
   const userMemory = await loadUserMemory(controls, batch[0]?.senderId ?? '');
@@ -2279,4 +2280,29 @@ async function detectGitRepos(workspaces: WorkspaceStore, controls: Controls, sc
   } catch {
     return false;
   }
+}
+
+/**
+ * Detect stale sessions and return a freshness notice for the agent.
+ * When the current session was created more than `sessionStaleHours` ago
+ * (default 48h), the agent is told that old tool results (directory
+ * listings, file contents, version info) may be outdated and must be
+ * re-verified with fresh tool calls. The session is NOT reset — recent
+ * context stays intact; only the agent's trust in old facts is degraded.
+ */
+function buildStaleSessionNotice(
+  controls: Controls,
+  sessions: SessionStore,
+  scope: string,
+): string[] | undefined {
+  const staleHours = controls.profileConfig.sessionStaleHours ?? 48;
+  if (staleHours <= 0) return undefined;
+  const entry = sessions.getRaw(scope);
+  if (!entry?.sessionId || !entry.createdAt) return undefined;
+  const ageMs = Date.now() - entry.createdAt;
+  if (ageMs < staleHours * 3600_000) return undefined;
+  const ageHours = Math.floor(ageMs / 3600_000);
+  return [
+    `【上下文新鲜度提醒】本会话已持续约 ${ageHours} 小时。之前对话中的工具结果（目录列表、文件内容、版本/tag 列表、代码片段等）可能已过时——工作区可能有新仓库、新文件、新版本。**涉及工作区现状时（项目是否存在、文件内容、版本号等），必须用新的工具调用重新验证，不要直接引用旧结果。**近期的对话上下文和结论仍可正常参考。`,
+  ];
 }

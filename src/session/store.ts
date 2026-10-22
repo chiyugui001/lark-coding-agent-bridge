@@ -10,6 +10,10 @@ export interface SessionEntry {
   /** Pinned cwd for the resumable session. Absent for the same reason. */
   cwd?: string;
   updatedAt: number;
+  /** When the current sessionId was first assigned (epoch ms). Used for
+   * stale-session detection: if now - createdAt > sessionStaleHours, a
+   * freshness notice is injected telling the agent to re-verify old facts. */
+  createdAt?: number;
   /** Per-scope idle-timeout override (minutes). 0 = explicitly off for this
    * scope, undefined = follow global default. Session resets preserve this
    * scope preference while removing the resumable session id/cwd. */
@@ -78,10 +82,12 @@ export class SessionStore {
     // Preserve idleTimeoutMinutes across run starts — it's a per-scope
     // preference, not per-run-instance state. /new (clear) wipes it.
     const prev = this.data[chatId];
+    const isNewSession = prev?.sessionId !== sessionId;
     this.data[chatId] = {
       sessionId,
       cwd,
       updatedAt: Date.now(),
+      ...(isNewSession ? { createdAt: Date.now() } : prev?.createdAt !== undefined ? { createdAt: prev.createdAt } : { createdAt: Date.now() }),
       ...(prev?.idleTimeoutMinutes !== undefined
         ? { idleTimeoutMinutes: prev.idleTimeoutMinutes }
         : {}),

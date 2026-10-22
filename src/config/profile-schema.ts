@@ -198,6 +198,14 @@ export interface ProfileConfig {
   /** Default responseMode for users who don't match any role rule (default 'technical'). */
   defaultResponseMode?: ResponseMode;
   /**
+   * Hours after which stale tool results in the session are flagged.
+   * When the session is older than this, a freshness notice is injected
+   * telling the agent to re-verify workspace facts instead of trusting
+   * old results. Session is NOT reset — recent context stays intact.
+   * Default 48. Set to 0 to disable.
+   */
+  sessionStaleHours?: number;
+  /**
    * Session continuity scope for group chats. `chat` (default) keeps one
    * agent session per chat; `chat+user` keys sessions by chat AND sender,
    * so each member carries their own conversation context. Private chats
@@ -289,6 +297,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     fsWhitelist?: { enabled?: boolean; dirs?: unknown };
     rolePermissions?: Array<{ name?: unknown; department?: unknown; jobTitle?: unknown; access?: unknown; responseMode?: unknown }>;
     defaultResponseMode?: 'technical' | 'support';
+    sessionStaleHours?: number;
     sessionScope?: 'chat' | 'chat+user';
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
@@ -354,6 +363,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     },
     ...(normalizeRolePermissions(raw.rolePermissions) ? { rolePermissions: normalizeRolePermissions(raw.rolePermissions) } : {}),
     ...(raw.defaultResponseMode === 'support' ? { defaultResponseMode: 'support' as const } : {}),
+    ...(typeof raw.sessionStaleHours === 'number' && raw.sessionStaleHours >= 0 ? { sessionStaleHours: raw.sessionStaleHours } : {}),
     sessionScope: raw.sessionScope === 'chat+user' ? 'chat+user' : 'chat',
     attachments: {
       maxCount: numberOr(raw.attachments?.maxCount, 10),

@@ -62,6 +62,7 @@ type StoredProfileConfig = Pick<
   | 'fsWhitelist'
   | 'rolePermissions'
   | 'defaultResponseMode'
+  | 'sessionStaleHours'
   | 'sessionScope'
   | 'attachments'
   | 'comments'
@@ -107,6 +108,7 @@ function serializeProfileConfig(profile: ProfileConfig): StoredProfileConfig {
     ...(profile.fsWhitelist ? { fsWhitelist: profile.fsWhitelist } : {}),
     ...(profile.rolePermissions ? { rolePermissions: profile.rolePermissions } : {}),
     ...(profile.defaultResponseMode ? { defaultResponseMode: profile.defaultResponseMode } : {}),
+    ...(profile.sessionStaleHours !== undefined ? { sessionStaleHours: profile.sessionStaleHours } : {}),
     sessionScope: profile.sessionScope,
     attachments: profile.attachments,
     comments: {},
