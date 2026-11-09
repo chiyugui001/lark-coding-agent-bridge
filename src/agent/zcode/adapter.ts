@@ -214,20 +214,25 @@ export class ZcodeAdapter implements AgentAdapter {
           }
         }
         if (sessionId) {
+          // Guard 1: enforce mode via PROTOCOL on EVERY turn — this is
+          // stored in the session itself and survives engine config resets.
+          // The .catch is for engines that don't support setMode on resume.
           await client
             .request('session/setMode', { sessionId, mode: zcodeModeFor(opts.permissionMode) })
             .catch(() => undefined);
-          queue = [];
-          waiters = [];
-          unsubscribe = client.subscribe(sessionId, (event) => {
-            queue.push(event);
-            while (waiters.length) waiters.shift()!();
-          });
-          await client.request('session/subscribe', {
-            sessionId,
-            deliveryKind: 'desktop-continuous',
-          });
-        } else {
+          // Guard 3: verify the session's tool list doesn't contain tools
+          // denied by the whitelist. Old sessions created during a config
+          // gap keep their full tool set — force them to rotate.
+          if (fsWhitelist?.enabled && (await sessionHasDeniedTools(client, sessionId))) {
+            log.warn('agent', 'security-session-rotated', {
+              sessionId,
+              reason: 'session has tools denied by whitelist',
+            });
+            sessionId = undefined;
+            unsubscribe?.();
+          }
+        }
+        if (!sessionId) {
           const fresh = await startSession();
           sessionId = fresh.sessionId;
           unsubscribe = fresh.unsubscribe;
@@ -259,7 +264,7 @@ export class ZcodeAdapter implements AgentAdapter {
             fromSession: sessionId,
             reason: (err as Error).message.slice(0, 120),
           });
-          unsubscribe();
+          unsubscribe?.();
           const fresh = await startSession();
           sessionId = fresh.sessionId;
           unsubscribe = fresh.unsubscribe;
@@ -319,7 +324,7 @@ export class ZcodeAdapter implements AgentAdapter {
                 fromSession: sessionId,
                 reason: 'turn.failed model unavailable',
               });
-              unsubscribe();
+              unsubscribe?.();
               const fresh = await startSession();
               sessionId = fresh.sessionId;
               unsubscribe = fresh.unsubscribe;
@@ -689,4 +694,31 @@ function formatAgentError(eventType: string, failureDetail: string): string {
   }
 
   return hint ? `${verb}：${detail} ${hint}` : `${verb}：${detail}`;
+}
+
+/** Tools that must never be available when the whitelist is on. */
+const WHITELIST_DENIED_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash']);
+
+/**
+ * Guard 3: check whether a session's tool list contains any tool that the
+ * whitelist denies. Sessions created during a config gap carry their full
+ * tool set indefinitely — this detects them so the adapter can rotate.
+ */
+async function sessionHasDeniedTools(
+  client: ZcodeAppServerClient,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    // Read the latest assistant message which records the session's tools
+    const result = await client.request<{ messages?: Array<{ info?: { tools?: Record<string, unknown> } }> }>(
+      'session/messages',
+      { sessionId, limit: 1 },
+    );
+    const tools = result?.messages?.[0]?.info?.tools;
+    if (!tools) return false;
+    return Object.keys(tools).some((t) => WHITELIST_DENIED_TOOLS.has(t));
+  } catch {
+    // Can't check — don't block on failure
+    return false;
+  }
 }

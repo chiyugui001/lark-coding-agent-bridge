@@ -171,6 +171,16 @@ export function syncZcodeFsWhitelist(sandbox: FsWhitelistConfig | undefined, def
   const ours = new Set<string>(NATIVE_TOOLS);
   const shouldHave = sandbox?.enabled === true;
   const has = current.filter((t) => ours.has(t));
+  // Guard 2: alert when the config has been externally tampered with —
+  // disallowedTools removed while the whitelist should be enforcing them.
+  if (shouldHave && has.length < NATIVE_TOOLS.length) {
+    log.warn('agent', 'security-config-tampered', {
+      expected: NATIVE_TOOLS.length,
+      found: has.length,
+      missing: NATIVE_TOOLS.filter((t) => !current.includes(t)),
+      action: 'repairing now',
+    });
+  }
   let next = current;
   if (shouldHave && has.length < NATIVE_TOOLS.length) {
     next = [...new Set([...current, ...NATIVE_TOOLS])];
