@@ -956,6 +956,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       ? [
           '【知识图谱检索】本工作区存在 graphify 知识图谱，且已挂载图谱查询 MCP 工具（graph_list_projects / graph_query / graph_path / graph_explain）。回答代码相关问题时**优先用这些 MCP 图谱工具**：先 graph_list_projects 找到目标项目 id，再用 graph_query（自然语言问题）或 graph_path（两符号间调用路径）/graph_explain（单符号解释）查询；结果自带源码位置，需要细节时按位置精读源码片段。只有图谱工具不可用或无结果时才回退读源码，不要直接通读大文件，也不要手动读 graph.json 原文（体积大，用查询工具）。',
           '图谱查询未命中时的重试规则：图谱节点标签是英文符号名（函数/变量/宏），中文自然语言可能匹配不到。graph_query 返回空或明显无关时，**换英文关键词重试**（从问题中提取领域术语翻译成英文符号命名风格，如"温湿度设置"→temp/humi/config_cmd/set_value，"串口指令"→uart_cmd/parse_frame/cmd_parse），**至少重试 2 组不同关键词后**才判定图谱无解；禁止图谱一次未中就跳去 git/文件全库扫射。',
+          '【仓库范围纪律】**第一步必须先从用户问题中明确目标项目名称**（型号→仓库名，如 TS301→ts30x-v3），然后用 graph_list_projects 确认仓库存在，再**仅在单仓库内**分析处理。**禁止跨全仓库搜索**（如对 sensor 根或 lora/ 目录整体 rg/grep——89 个仓库会挂起数分钟）。只有用户明确表述需要多仓库分析时才跨仓库，且**仅限用户点名的那几个仓库**，逐个分别搜索，不做目录级全量扫描。',
         ]
       : undefined;
   // Version-aware guidance: with the whitelist on and git repos present, the
