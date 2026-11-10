@@ -202,6 +202,7 @@ export class ZcodeAdapter implements AgentAdapter {
 
       let unsubscribe: (() => void) | undefined;
       let wake: (() => void) | undefined;
+      let idleTimer: NodeJS.Timeout | undefined;
       let queue: AppServerSessionEvent[] = [];
       let waiters: Array<() => void> = [];
       try {
@@ -292,6 +293,24 @@ export class ZcodeAdapter implements AgentAdapter {
           await client.request('session/send', { sessionId, content: prompt });
         }
 
+        // Idle watchdog: if the event stream goes silent mid-run for over
+        // 5 minutes (jam), give up on this turn instead of hanging forever
+        // — the queue behind this run is otherwise blocked indefinitely.
+        const IDLE_TIMEOUT_MS = 5 * 60_000;
+        const armIdleWatchdog = (): void => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            log.warn('agent', 'run-idle-timeout', { sessionId, idleMs: IDLE_TIMEOUT_MS });
+            queue.push({
+              type: 'turn.failed',
+              payload: { error: { message: `事件流超过 ${Math.round(IDLE_TIMEOUT_MS / 60000)} 分钟无活动，已自动终止。请重新发送。` } },
+            });
+            while (waiters.length) waiters.shift()!();
+          }, IDLE_TIMEOUT_MS);
+          idleTimer.unref?.();
+        };
+        armIdleWatchdog();
+
         while (true) {
           while (queue.length === 0) {
             await Promise.race([
@@ -306,6 +325,7 @@ export class ZcodeAdapter implements AgentAdapter {
             wake = undefined;
           }
           const event = queue.shift()!;
+          armIdleWatchdog(); // any inbound event resets the idle timer
           if (event.type === 'turn.completed') {
             yield* translateEvent(event);
             // Sync BEFORE the terminal done yield — consumers stop pulling
@@ -376,6 +396,7 @@ export class ZcodeAdapter implements AgentAdapter {
           terminationReason: 'failed',
         };
       } finally {
+        clearTimeout(idleTimer);
         unsubscribe?.();
         markSettled();
       }

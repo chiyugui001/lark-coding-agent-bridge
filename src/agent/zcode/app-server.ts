@@ -41,7 +41,7 @@ const REQUEST_TIMEOUT_MS = 120_000;
 
 export class ZcodeAppServerClient {
   private readonly command: string;
-  private readonly preArgs: string[];
+  private readonly preArgs: readonly string[];
   private readonly env: NodeJS.ProcessEnv;
   private child: AppServerChild | undefined;
   private nextId = 1;
@@ -50,6 +50,9 @@ export class ZcodeAppServerClient {
   private startPromise: Promise<AppServerChild> | undefined;
   private crashed: Error | undefined;
   private crashWaiters: Array<() => void> = [];
+  private heartbeatTimer: NodeJS.Timeout | undefined;
+  /** Counts every message received from the child (responses + events). */
+  private lastInboundAt = Date.now();
 
   /** Resolves the next time the app-server process dies (for run loops racing on it). */
   get nextCrash(): Promise<void> {
@@ -72,7 +75,38 @@ export class ZcodeAppServerClient {
       this.startPromise = undefined;
       throw err;
     });
+    this.ensureHeartbeat();
     return this.startPromise;
+  }
+
+  /**
+   * Heartbeat: every 30s, probe the engine with a lightweight ping. If the
+   * process is alive but silent for over 90s (stdio pipe jammed — the
+   * process runs but events/responses never arrive), treat it as a crash
+   * and tear it down so the next run reconnects fresh.
+   */
+  private ensureHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      const child = this.child;
+      if (!child || child.exitCode !== null || child.signalCode !== null) return;
+      const silentMs = Date.now() - this.lastInboundAt;
+      if (silentMs < 90_000) {
+        // Still healthy or recently active — send a probe ping.
+        this.request('ping', {}).catch(() => undefined);
+        return;
+      }
+      // Over 90s with zero inbound traffic while a run may be waiting —
+      // the pipe is almost certainly jammed. Force-crash to recover.
+      log.warn('agent', 'app-server-heartbeat-dead', {
+        pid: child.pid ?? null,
+        silentMs,
+        action: 'force-kill for reconnection',
+      });
+      this.handleCrash(new Error(`app-server unresponsive for ${Math.round(silentMs / 1000)}s (heartbeat)`));
+      child.kill('SIGKILL');
+    }, 30_000);
+    this.heartbeatTimer.unref?.();
   }
 
   private async start(): Promise<AppServerChild> {
@@ -114,6 +148,7 @@ export class ZcodeAppServerClient {
   }
 
   private handleMessage(msg: JsonRpcMessage): void {
+    this.lastInboundAt = Date.now();
     // Server→client request: must reply or the waiting call times out.
     if (msg.method && msg.id !== undefined && (msg.result === undefined && msg.error === undefined)) {
       this.replyToServer(String(msg.id), msg.method);
