@@ -256,7 +256,18 @@ export class ZcodeAdapter implements AgentAdapter {
           });
         }
         try {
-          await client.request('session/send', { sessionId, content: prompt });
+          await client.request('session/send', {
+            sessionId,
+            content: prompt,
+            ...(opts.images && opts.images.length > 0
+              ? { attachments: opts.images.map((p) => ({
+                  kind: 'image' as const,
+                  filename: p.split(/[\\/]/).pop() ?? 'image.jpg',
+                  mimeType: guessImageMime(p),
+                  localPath: p,
+                })) }
+              : {}),
+          });
         } catch (err) {
           if (!isModelUnavailableError((err as Error).message)) throw err;
           recoveredFromSessionId = sessionId;
@@ -721,4 +732,13 @@ async function sessionHasDeniedTools(
     // Can't check — don't block on failure
     return false;
   }
+}
+
+/** Guess image MIME type from file extension (default jpeg). */
+function guessImageMime(path: string): string {
+  const ext = path.toLowerCase().split('.').pop();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
 }
