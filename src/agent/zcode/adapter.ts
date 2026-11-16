@@ -172,6 +172,38 @@ export class ZcodeAdapter implements AgentAdapter {
           detail,
         );
       let recoveredFromSessionId: string | undefined;
+      /**
+       * Wire the run loop to a session's event stream. The local listener
+       * is registered BEFORE the protocol subscription so no event is lost
+       * between the two. Both the fresh-session and the resume path MUST
+       * go through this — the previous run's listener was torn down in its
+       * finally block, so a resumed session that skips re-subscription
+       * receives nothing and dies on the idle watchdog.
+       */
+      const subscribeSessionEvents = async (
+        targetId: string,
+      ): Promise<{
+        unsubscribe: () => void;
+        queue: AppServerSessionEvent[];
+        waiters: Array<() => void>;
+      }> => {
+        const queue: AppServerSessionEvent[] = [];
+        const waiters: Array<() => void> = [];
+        const unsubscribe = client.subscribe(targetId, (event) => {
+          queue.push(event);
+          while (waiters.length) waiters.shift()!();
+        });
+        try {
+          await client.request('session/subscribe', {
+            sessionId: targetId,
+            deliveryKind: 'desktop-continuous',
+          });
+        } catch (err) {
+          unsubscribe();
+          throw err;
+        }
+        return { unsubscribe, queue, waiters };
+      };
       const startSession = async (): Promise<{
         sessionId: string;
         unsubscribe: () => void;
@@ -187,17 +219,8 @@ export class ZcodeAdapter implements AgentAdapter {
         await client
           .request('session/setMode', { sessionId: freshId, mode: zcodeModeFor(opts.permissionMode) })
           .catch(() => undefined);
-        const queue: AppServerSessionEvent[] = [];
-        const waiters: Array<() => void> = [];
-        const unsubscribe = client.subscribe(freshId, (event) => {
-          queue.push(event);
-          while (waiters.length) waiters.shift()!();
-        });
-        await client.request('session/subscribe', {
-          sessionId: freshId,
-          deliveryKind: 'desktop-continuous',
-        });
-        return { sessionId: freshId, unsubscribe, queue, waiters };
+        const attached = await subscribeSessionEvents(freshId);
+        return { sessionId: freshId, ...attached };
       };
 
       let unsubscribe: (() => void) | undefined;
@@ -231,6 +254,13 @@ export class ZcodeAdapter implements AgentAdapter {
             });
             sessionId = undefined;
             unsubscribe?.();
+          } else {
+            // Resumed sessions re-attach the event stream every turn — see
+            // subscribeSessionEvents for why this must not be skipped.
+            const attached = await subscribeSessionEvents(sessionId);
+            unsubscribe = attached.unsubscribe;
+            queue = attached.queue;
+            waiters = attached.waiters;
           }
         }
         if (!sessionId) {
@@ -301,6 +331,19 @@ export class ZcodeAdapter implements AgentAdapter {
           clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
             log.warn('agent', 'run-idle-timeout', { sessionId, idleMs: IDLE_TIMEOUT_MS });
+            // Cancel the engine-side prompt too — giving up locally leaves
+            // the session locked ("A prompt is already running") and the
+            // resend this error suggests would be rejected outright.
+            if (sessionId) {
+              void client
+                .request('session/stop', { sessionId })
+                .catch((err) =>
+                  log.warn('agent', 'run-idle-stop-failed', {
+                    sessionId,
+                    message: (err as Error).message,
+                  }),
+                );
+            }
             queue.push({
               type: 'turn.failed',
               payload: { error: { message: `事件流超过 ${Math.round(IDLE_TIMEOUT_MS / 60000)} 分钟无活动，已自动终止。请重新发送。` } },

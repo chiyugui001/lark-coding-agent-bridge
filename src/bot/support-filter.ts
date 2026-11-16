@@ -54,8 +54,11 @@ const FILTER_RULES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /`([a-zA-Z_]\w{2,})\(\)`/g, replacement: '相关功能' },
   // Hex register/address patterns
   { pattern: /\b0x[0-9A-Fa-f]{3,8}\b/g, replacement: '[寄存器配置]' },
-  // Line number references like :142, L142
-  { pattern: /(?<=\w)[:L]\d{2,4}\b/g, replacement: '' },
+  // Line number references like :142, L142 — but NOT clock times (9:55,
+  // 10:05): only strip when preceded by a letter (identifier/file context)
+  // or when the number has 3+ digits (line numbers rarely <100 in refs).
+  { pattern: /(?<=[a-zA-Z_])[:L]\d{2,4}\b/g, replacement: '' },
+  { pattern: /(?<=\w)[:L]\d{3,4}\b/g, replacement: '' },
 ];
 
 /**
