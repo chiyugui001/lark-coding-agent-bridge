@@ -152,7 +152,15 @@ export function buildAgentPrompt(input: BuildAgentPromptInput): string {
     promptSection('user_input', {
       text: input.userInput,
       ...(input.attachments && input.attachments.length > 0
-        ? { attachments: input.attachments }
+        ? {
+            attachments: input.attachments,
+            attachment_reading_guide:
+              '大文件纪律：附件 size 超过 500000（500KB）时，禁止全量 read_text_file——' +
+              '超大文件会超出 MCP 返回限制，读回空内容。必须用 head/tail 参数分段读' +
+              '（如 head:500 看开头，tail:500 看结尾，或先用 head 定位结构再分段），' +
+              '日志类文件优先 tail 看最新内容。若需搜索文件内容，用 fs 的 search_files ' +
+              '定位 + 分段 read 组合，不要试图一次读完整个文件。',
+          }
         : {}),
     }),
   ];
